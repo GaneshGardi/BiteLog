@@ -1,3 +1,4 @@
+
 import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -19,6 +20,8 @@ import {
   useRouter,
   useFocusEffect,
 } from "expo-router";
+import { Ionicons } from "@expo/vector-icons";
+import { SafeAreaView } from "react-native-safe-area-context";
 import { supabase } from "../../lib/supabase";
 
 type GroupInfo = {
@@ -55,7 +58,7 @@ type DailyProgress = {
 };
 
 export default function GroupDetailsScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id } = useLocalSearchParams<{ id: string | string[] }>();
   const router = useRouter();
 
   const groupId = Array.isArray(id) ? id[0] : id;
@@ -127,10 +130,9 @@ export default function GroupDetailsScreen() {
         setProgressError("");
       } catch (error) {
         console.error("Error loading group calorie progress:", error);
-
         setDailyProgress([]);
         setProgressError(
-          "Could not load calorie progress. Pull down to retry.",
+          "Could not load calorie progress. Pull down to retry."
         );
       }
 
@@ -161,7 +163,7 @@ export default function GroupDetailsScreen() {
 
       Alert.alert(
         "Unable to load group",
-        error instanceof Error ? error.message : "Please try again.",
+        error instanceof Error ? error.message : "Please try again."
       );
     } finally {
       setLoading(false);
@@ -173,7 +175,7 @@ export default function GroupDetailsScreen() {
     useCallback(() => {
       setLoading(true);
       void loadGroup();
-    }, [loadGroup]),
+    }, [loadGroup])
   );
 
   const refresh = () => {
@@ -195,7 +197,6 @@ export default function GroupDetailsScreen() {
     }
 
     let cancelled = false;
-
     setSearching(true);
 
     const timeout = setTimeout(async () => {
@@ -204,7 +205,7 @@ export default function GroupDetailsScreen() {
           "search_users_for_invites",
           {
             p_search: searchTerm,
-          },
+          }
         );
 
         if (error) throw error;
@@ -215,9 +216,8 @@ export default function GroupDetailsScreen() {
       } catch (error) {
         if (!cancelled) {
           console.error("Username search failed:", error);
-
           setSearchError(
-            "Search is temporarily unavailable. You can still enter a username directly.",
+            "Search is temporarily unavailable. You can still enter a username directly."
           );
         }
       } finally {
@@ -248,7 +248,7 @@ export default function GroupDetailsScreen() {
     if (!targetUsername) {
       Alert.alert(
         "Username required",
-        "Enter the username of the person you want to invite.",
+        "Enter the username of the person you want to invite."
       );
       return;
     }
@@ -256,7 +256,7 @@ export default function GroupDetailsScreen() {
     if (!groupId) {
       Alert.alert(
         "Group unavailable",
-        "Reopen the group and try again.",
+        "Reopen the group and try again."
       );
       return;
     }
@@ -278,7 +278,7 @@ export default function GroupDetailsScreen() {
 
       Alert.alert(
         "Invitation sent!",
-        `Your invitation to @${targetUsername} has been sent.`,
+        `Your invitation to @${targetUsername} has been sent.`
       );
     } catch (error) {
       console.error("Error sending invitation:", error);
@@ -292,7 +292,6 @@ export default function GroupDetailsScreen() {
     }
   };
 
-  // Open the selected member's individual weekly history screen.
   const openMemberHistory = (memberId: string) => {
     if (!groupId || !memberId) return;
 
@@ -306,18 +305,33 @@ export default function GroupDetailsScreen() {
   };
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container} edges={["bottom"]}>
       <Stack.Screen
-        options={{ title: group?.name ?? "Group details" }}
+        options={{
+          title: group?.name ?? "Group details",
+          headerStyle: { backgroundColor: "#101010" },
+          headerTintColor: "#FFFFFF",
+          headerTitleStyle: { fontWeight: "700" },
+          headerShadowVisible: false,
+          contentStyle: { backgroundColor: "#101010" },
+        }}
       />
 
       {loading ? (
         <View style={styles.center}>
-          <ActivityIndicator size="large" color="#729580" />
+          <ActivityIndicator size="large" color="#B6F36B" />
           <Text style={styles.muted}>Loading group...</Text>
         </View>
       ) : !group ? (
         <View style={styles.center}>
+          <View style={styles.emptyIcon}>
+            <Ionicons
+              name="people-outline"
+              size={30}
+              color="#B6F36B"
+            />
+          </View>
+
           <Text style={styles.heading}>Group not found</Text>
 
           <Text style={styles.muted}>
@@ -325,52 +339,93 @@ export default function GroupDetailsScreen() {
           </Text>
 
           <Pressable
-            style={styles.button}
+            style={styles.primaryButton}
             onPress={() => router.back()}
           >
-            <Text style={styles.buttonText}>Go back</Text>
+            <Text style={styles.primaryButtonText}>Go back</Text>
           </Pressable>
         </View>
       ) : (
         <ScrollView
           contentContainerStyle={styles.content}
+          showsVerticalScrollIndicator={false}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
               onRefresh={refresh}
+              tintColor="#B6F36B"
+              colors={["#B6F36B"]}
+              progressBackgroundColor="#1A1A1A"
             />
           }
         >
+          {/* Group overview */}
           <View style={styles.hero}>
             <View style={styles.groupIcon}>
-              <Text style={styles.groupIconText}>
-                {group.name.trim().charAt(0).toUpperCase()}
-              </Text>
+              <Ionicons
+                name="people"
+                size={32}
+                color="#B6F36B"
+              />
             </View>
 
             <Text style={styles.groupName}>{group.name}</Text>
 
-            <Text style={styles.muted}>
-              {members.length}{" "}
-              {members.length === 1 ? "member" : "members"}
+            <View style={styles.memberCountBadge}>
+              <Ionicons
+                name="people-outline"
+                size={14}
+                color="#B6F36B"
+              />
+              <Text style={styles.memberCountText}>
+                {members.length}{" "}
+                {members.length === 1 ? "member" : "members"}
+              </Text>
+            </View>
+
+            <Text style={styles.heroDescription}>
+              Track your progress together.
             </Text>
           </View>
 
+          {/* Members heading */}
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Members</Text>
-            <Text style={styles.count}>{members.length}</Text>
+            <View>
+              <Text style={styles.sectionTitle}>Group members</Text>
+              <Text style={styles.sectionSubtitle}>
+                Today's calorie progress
+              </Text>
+            </View>
+
+            <View style={styles.countBadge}>
+              <Text style={styles.countText}>{members.length}</Text>
+            </View>
           </View>
 
           {!!progressError && (
-            <Text style={styles.progressError}>
-              {progressError}
-            </Text>
+            <View style={styles.errorBanner}>
+              <Ionicons
+                name="alert-circle-outline"
+                size={18}
+                color="#FF8A8A"
+              />
+              <Text style={styles.errorBannerText}>
+                {progressError}
+              </Text>
+            </View>
           )}
 
+          {/* Member cards */}
           {members.length === 0 ? (
             <View style={styles.emptyCard}>
-              <Text style={styles.muted}>
-                No members found yet.
+              <Ionicons
+                name="person-add-outline"
+                size={30}
+                color="#777777"
+              />
+              <Text style={styles.emptyTitle}>No members yet</Text>
+              <Text style={styles.emptyDescription}>
+                Invite friends to start tracking progress together.
               </Text>
             </View>
           ) : (
@@ -378,7 +433,7 @@ export default function GroupDetailsScreen() {
               const profile = profiles[member.user_id];
 
               const progress = dailyProgress.find(
-                (item) => item.user_id === member.user_id,
+                (item) => item.user_id === member.user_id
               );
 
               const memberUsername =
@@ -403,6 +458,11 @@ export default function GroupDetailsScreen() {
                   ? Math.round((consumed / goal) * 100)
                   : null;
 
+              const progressWidth = `${Math.min(
+                Math.max(percentage ?? 0, 0),
+                100
+              )}%` as `${number}%`;
+
               return (
                 <Pressable
                   key={member.user_id}
@@ -414,9 +474,7 @@ export default function GroupDetailsScreen() {
                   accessibilityLabel={
                     `View weekly history for ${displayName}`
                   }
-                  onPress={() =>
-                    openMemberHistory(member.user_id)
-                  }
+                  onPress={() => openMemberHistory(member.user_id)}
                 >
                   <View style={styles.memberTopRow}>
                     <View style={styles.avatar}>
@@ -440,40 +498,54 @@ export default function GroupDetailsScreen() {
                     <View
                       style={[
                         styles.roleBadge,
-                        member.role === "owner" &&
-                          styles.ownerBadge,
+                        member.role === "owner" && styles.ownerBadge,
                       ]}
                     >
+                      <Ionicons
+                        name={
+                          member.role === "owner"
+                            ? "shield-checkmark"
+                            : "person-outline"
+                        }
+                        size={11}
+                        color={
+                          member.role === "owner"
+                            ? "#B6F36B"
+                            : "#999999"
+                        }
+                      />
                       <Text
                         style={[
                           styles.roleText,
-                          member.role === "owner" &&
-                            styles.ownerText,
+                          member.role === "owner" && styles.ownerText,
                         ]}
                       >
-                        {member.role === "owner"
-                          ? "Owner"
-                          : "Member"}
+                        {member.role === "owner" ? "Owner" : "Member"}
                       </Text>
                     </View>
                   </View>
 
                   <View style={styles.memberProgress}>
                     <View style={styles.calorieNumbers}>
-                      <Text style={styles.caloriesConsumed}>
-                        {Math.round(consumed).toLocaleString()}
-                      </Text>
+                      <View>
+                        <Text style={styles.caloriesConsumed}>
+                          {Math.round(consumed).toLocaleString()}
+                          <Text style={styles.kcalLabel}> kcal</Text>
+                        </Text>
 
-                      <Text style={styles.calorieGoal}>
-                        {goal !== null && goal > 0
-                          ? `/ ${Math.round(goal).toLocaleString()} kcal`
-                          : "kcal · Goal not set"}
-                      </Text>
+                        <Text style={styles.calorieGoal}>
+                          {goal !== null && goal > 0
+                            ? `of ${Math.round(goal).toLocaleString()} kcal goal`
+                            : "Daily goal not set"}
+                        </Text>
+                      </View>
 
                       {percentage !== null && (
-                        <Text style={styles.progressPercentage}>
-                          {percentage}%
-                        </Text>
+                        <View style={styles.percentageBadge}>
+                          <Text style={styles.progressPercentage}>
+                            {percentage}%
+                          </Text>
+                        </View>
                       )}
                     </View>
 
@@ -482,53 +554,80 @@ export default function GroupDetailsScreen() {
                         <View
                           style={[
                             styles.progressFill,
-                            {
-                              width: `${Math.min(
-                                percentage ?? 0,
-                                100,
-                              )}%`,
-                            },
+                            { width: progressWidth },
                           ]}
                         />
                       </View>
                     )}
 
                     {percentage !== null && percentage >= 100 && (
-                      <Text style={styles.goalReached}>
-                        Daily goal reached
-                      </Text>
+                      <View style={styles.goalReachedRow}>
+                        <Ionicons
+                          name="checkmark-circle"
+                          size={14}
+                          color="#B6F36B"
+                        />
+                        <Text style={styles.goalReached}>
+                          Daily goal reached
+                        </Text>
+                      </View>
                     )}
                   </View>
 
-                  <Text style={styles.historyHint}>
-                    Tap to view weekly history ›
-                  </Text>
+                  <View style={styles.historyHintRow}>
+                    <Text style={styles.historyHint}>
+                      View weekly history
+                    </Text>
+                    <Ionicons
+                      name="chevron-forward"
+                      size={16}
+                      color="#B6F36B"
+                    />
+                  </View>
                 </Pressable>
               );
             })
           )}
 
+          {/* Invite friends */}
           <Pressable
-            style={styles.button}
+            style={({ pressed }) => [
+              styles.inviteButton,
+              pressed && styles.inviteButtonPressed,
+            ]}
             onPress={() => setInviteVisible(true)}
           >
-            <Text style={styles.buttonText}>
-              + Invite friends
+            <Ionicons
+              name="person-add-outline"
+              size={19}
+              color="#101010"
+            />
+            <Text style={styles.inviteButtonText}>
+              Invite friends
             </Text>
           </Pressable>
 
-          <Text style={styles.footer}>
-            Only daily calorie progress is shared. Individual food
-            logs remain private.
-          </Text>
+          <View style={styles.privacyNote}>
+            <Ionicons
+              name="lock-closed-outline"
+              size={15}
+              color="#777777"
+            />
+            <Text style={styles.footer}>
+              Only daily calorie progress is shared. Individual food
+              logs remain private.
+            </Text>
+          </View>
         </ScrollView>
       )}
 
+      {/* Invite modal */}
       <Modal
         visible={inviteVisible}
         transparent
         animationType="slide"
         onRequestClose={closeInviteModal}
+        statusBarTranslucent
       >
         <KeyboardAvoidingView
           style={styles.modalOverlay}
@@ -539,477 +638,761 @@ export default function GroupDetailsScreen() {
             onPress={closeInviteModal}
           />
 
-          <View style={styles.modalContent}>
-            <View style={styles.modalHandle} />
+          <SafeAreaView
+            style={styles.modalSafeArea}
+            edges={["bottom"]}
+          >
+            <View style={styles.modalContent}>
+              <View style={styles.modalHandle} />
 
-            <Text style={styles.modalTitle}>
-              Invite a friend
-            </Text>
+              <View style={styles.modalHeader}>
+                <View style={styles.modalIcon}>
+                  <Ionicons
+                    name="person-add"
+                    size={23}
+                    color="#B6F36B"
+                  />
+                </View>
 
-            <Text style={styles.modalDescription}>
-              Search by username or display name, or enter an exact
-              username.
-            </Text>
+                <Pressable
+                  style={styles.closeButton}
+                  onPress={closeInviteModal}
+                  disabled={sending}
+                >
+                  <Ionicons
+                    name="close"
+                    size={21}
+                    color="#AAAAAA"
+                  />
+                </Pressable>
+              </View>
 
-            <Text style={styles.inputLabel}>USERNAME</Text>
+              <Text style={styles.modalTitle}>
+                Invite a friend
+              </Text>
 
-            <TextInput
-              style={styles.input}
-              placeholder="e.g. fitness_friend"
-              placeholderTextColor="#9CA3AF"
-              value={username}
-              onChangeText={setUsername}
-              autoCapitalize="none"
-              autoCorrect={false}
-              returnKeyType="send"
-              onSubmitEditing={() => void sendInvitation()}
-              editable={!sending}
-              autoFocus
-            />
+              <Text style={styles.modalDescription}>
+                Find people by username or display name and invite
+                them to your group.
+              </Text>
 
-            {searching && (
-              <View style={styles.searchStatus}>
-                <ActivityIndicator
-                  size="small"
-                  color="#729580"
+              <Text style={styles.inputLabel}>USERNAME</Text>
+
+              <View style={styles.inputContainer}>
+                <Ionicons
+                  name="search-outline"
+                  size={19}
+                  color="#777777"
                 />
-                <Text style={styles.searchStatusText}>
-                  Searching users...
-                </Text>
+
+                <TextInput
+                  style={styles.input}
+                  placeholder="Search username..."
+                  placeholderTextColor="#777777"
+                  value={username}
+                  onChangeText={setUsername}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                  returnKeyType="send"
+                  onSubmitEditing={() => void sendInvitation()}
+                  editable={!sending}
+                  autoFocus
+                />
+
+                {searching && (
+                  <ActivityIndicator
+                    size="small"
+                    color="#B6F36B"
+                  />
+                )}
               </View>
-            )}
 
-            {!!searchError && (
-              <Text style={styles.errorText}>
-                {searchError}
-              </Text>
-            )}
-
-            {username.trim().length >= 2 &&
-              !searching &&
-              !searchError &&
-              searchResults.length === 0 && (
-                <Text style={styles.searchStatusText}>
-                  No matches. You can still invite by exact username.
+              {!!searchError && (
+                <Text style={styles.errorText}>
+                  {searchError}
                 </Text>
               )}
 
-            {searchResults.length > 0 && (
-              <View style={styles.resultsContainer}>
-                <Text style={styles.resultsTitle}>
-                  Matching users
-                </Text>
+              {username.trim().length >= 2 &&
+                !searching &&
+                !searchError &&
+                searchResults.length === 0 && (
+                  <Text style={styles.searchStatusText}>
+                    No matches. You can still invite by exact username.
+                  </Text>
+                )}
 
-                {searchResults.map((user) => {
-                  const displayName =
-                    user.display_name?.trim() || user.username;
+              {searchResults.length > 0 && (
+                <View style={styles.resultsContainer}>
+                  <Text style={styles.resultsTitle}>
+                    MATCHING USERS
+                  </Text>
 
-                  return (
-                    <Pressable
-                      key={user.user_id}
-                      style={styles.resultRow}
-                      onPress={() => setUsername(user.username)}
-                      disabled={sending}
-                    >
-                      <View style={styles.resultAvatar}>
-                        <Text style={styles.resultAvatarText}>
-                          {displayName.charAt(0).toUpperCase()}
+                  {searchResults.map((user) => {
+                    const displayName =
+                      user.display_name?.trim() || user.username;
+
+                    return (
+                      <Pressable
+                        key={user.user_id}
+                        style={styles.resultRow}
+                        onPress={() => setUsername(user.username)}
+                        disabled={sending}
+                      >
+                        <View style={styles.resultAvatar}>
+                          <Text style={styles.resultAvatarText}>
+                            {displayName.charAt(0).toUpperCase()}
+                          </Text>
+                        </View>
+
+                        <View style={styles.resultInfo}>
+                          <Text style={styles.resultName}>
+                            {displayName}
+                          </Text>
+                          <Text style={styles.usernameLabel}>
+                            @{user.username}
+                          </Text>
+                        </View>
+
+                        <Text style={styles.selectLabel}>
+                          Select
                         </Text>
-                      </View>
-
-                      <View style={styles.resultInfo}>
-                        <Text style={styles.resultName}>
-                          {displayName}
-                        </Text>
-
-                        <Text style={styles.usernameLabel}>
-                          @{user.username}
-                        </Text>
-                      </View>
-
-                      <Text style={styles.selectLabel}>
-                        Select
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            )}
-
-            <Pressable
-              style={[
-                styles.button,
-                sending && styles.disabledButton,
-              ]}
-              onPress={() => void sendInvitation()}
-              disabled={sending}
-            >
-              {sending ? (
-                <ActivityIndicator color="#FFFFFF" />
-              ) : (
-                <Text style={styles.buttonText}>
-                  Send invitation
-                </Text>
+                      </Pressable>
+                    );
+                  })}
+                </View>
               )}
-            </Pressable>
 
-            <Pressable
-              style={styles.cancelButton}
-              onPress={closeInviteModal}
-              disabled={sending}
-            >
-              <Text style={styles.cancelButtonText}>
-                Cancel
-              </Text>
-            </Pressable>
-          </View>
+              <Pressable
+                style={[
+                  styles.sendButton,
+                  sending && styles.disabledButton,
+                ]}
+                onPress={() => void sendInvitation()}
+                disabled={sending}
+              >
+                {sending ? (
+                  <ActivityIndicator color="#101010" />
+                ) : (
+                  <>
+                    <Ionicons
+                      name="send-outline"
+                      size={17}
+                      color="#101010"
+                    />
+                    <Text style={styles.sendButtonText}>
+                      Send invitation
+                    </Text>
+                  </>
+                )}
+              </Pressable>
+
+              <Pressable
+                style={styles.cancelButton}
+                onPress={closeInviteModal}
+                disabled={sending}
+              >
+                <Text style={styles.cancelButtonText}>Cancel</Text>
+              </Pressable>
+            </View>
+          </SafeAreaView>
         </KeyboardAvoidingView>
       </Modal>
-    </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#F7F8F6",
+    backgroundColor: "#101010",
   },
+
   content: {
     padding: 20,
     paddingBottom: 36,
   },
+
   center: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
     padding: 24,
-    gap: 12,
+    backgroundColor: "#101010",
   },
-  hero: {
-    alignItems: "center",
-    backgroundColor: "#FFFFFF",
-    padding: 24,
-    borderRadius: 20,
-    marginBottom: 28,
-    borderWidth: 1,
-    borderColor: "#E9EDE9",
-  },
-  groupIcon: {
+
+  emptyIcon: {
     width: 68,
     height: 68,
     borderRadius: 22,
-    backgroundColor: "#EAF0EB",
+    backgroundColor: "#1A1A1A",
+    borderWidth: 1,
+    borderColor: "#303030",
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: 14,
+    marginBottom: 18,
   },
-  groupIconText: {
-    fontSize: 30,
-    fontWeight: "700",
-    color: "#557361",
+
+  hero: {
+    alignItems: "center",
+    backgroundColor: "#1A1A1A",
+    padding: 25,
+    borderRadius: 22,
+    marginBottom: 30,
+    borderWidth: 1,
+    borderColor: "#303030",
   },
+
+  groupIcon: {
+    width: 72,
+    height: 72,
+    borderRadius: 24,
+    backgroundColor: "#252D20",
+    borderWidth: 1,
+    borderColor: "#46543A",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: 16,
+  },
+
   groupName: {
-    fontSize: 23,
-    fontWeight: "700",
-    color: "#202923",
+    fontSize: 24,
+    fontWeight: "800",
+    color: "#FFFFFF",
     textAlign: "center",
   },
+
+  memberCountBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: "#252D20",
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 20,
+    marginTop: 12,
+  },
+
+  memberCountText: {
+    color: "#B6F36B",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+
+  heroDescription: {
+    color: "#888888",
+    fontSize: 13,
+    marginTop: 13,
+  },
+
   heading: {
     fontSize: 22,
     fontWeight: "700",
-    color: "#202923",
+    color: "#FFFFFF",
   },
+
   muted: {
-    color: "#849087",
+    color: "#888888",
     fontSize: 14,
-    marginTop: 6,
+    marginTop: 8,
+    textAlign: "center",
   },
+
   sectionHeader: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
-    marginBottom: 14,
+    justifyContent: "space-between",
+    marginBottom: 16,
   },
+
   sectionTitle: {
     fontSize: 19,
-    fontWeight: "700",
-    color: "#202923",
+    fontWeight: "800",
+    color: "#FFFFFF",
   },
-  count: {
-    overflow: "hidden",
-    backgroundColor: "#EAF0EB",
-    color: "#557361",
-    paddingHorizontal: 9,
-    paddingVertical: 3,
-    borderRadius: 10,
-    fontWeight: "600",
-  },
-  memberCard: {
-    backgroundColor: "#FFFFFF",
-    borderRadius: 16,
-    padding: 16,
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: "#E9EDE9",
-  },
-  memberCardPressed: {
-    opacity: 0.78,
-    borderColor: "#729580",
-  },
-  historyHint: {
-    color: "#557361",
+
+  sectionSubtitle: {
     fontSize: 12,
-    fontWeight: "600",
-    marginTop: 14,
-    textAlign: "right",
+    color: "#888888",
+    marginTop: 4,
   },
+
+  countBadge: {
+    minWidth: 32,
+    height: 32,
+    paddingHorizontal: 9,
+    borderRadius: 11,
+    backgroundColor: "#252D20",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  countText: {
+    color: "#B6F36B",
+    fontSize: 13,
+    fontWeight: "800",
+  },
+
+  errorBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 9,
+    backgroundColor: "#2A1B1B",
+    borderWidth: 1,
+    borderColor: "#553030",
+    padding: 13,
+    borderRadius: 12,
+    marginBottom: 14,
+  },
+
+  errorBannerText: {
+    color: "#FFAAAA",
+    fontSize: 12,
+    flex: 1,
+    lineHeight: 18,
+  },
+
+  memberCard: {
+    backgroundColor: "#1A1A1A",
+    borderRadius: 18,
+    padding: 16,
+    marginBottom: 13,
+    borderWidth: 1,
+    borderColor: "#303030",
+  },
+
+  memberCardPressed: {
+    opacity: 0.75,
+    borderColor: "#718C4D",
+  },
+
   memberTopRow: {
     flexDirection: "row",
     alignItems: "center",
   },
+
   avatar: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: "#EAF0EB",
+    width: 46,
+    height: 46,
+    borderRadius: 16,
+    backgroundColor: "#252D20",
+    borderWidth: 1,
+    borderColor: "#46543A",
     alignItems: "center",
     justifyContent: "center",
     marginRight: 12,
   },
+
   avatarText: {
-    fontSize: 17,
-    fontWeight: "700",
-    color: "#557361",
+    fontSize: 18,
+    fontWeight: "800",
+    color: "#B6F36B",
   },
+
   memberInfo: {
     flex: 1,
   },
+
   memberName: {
     fontSize: 15,
-    fontWeight: "600",
-    color: "#202923",
+    fontWeight: "700",
+    color: "#FFFFFF",
   },
+
   usernameLabel: {
-    fontSize: 13,
-    color: "#879189",
-    marginTop: 3,
-  },
-  roleBadge: {
-    backgroundColor: "#F1F3F0",
-    paddingHorizontal: 9,
-    paddingVertical: 5,
-    borderRadius: 8,
-  },
-  ownerBadge: {
-    backgroundColor: "#EAF0EB",
-  },
-  roleText: {
     fontSize: 12,
-    fontWeight: "600",
-    color: "#68756C",
+    color: "#888888",
+    marginTop: 4,
   },
+
+  roleBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    backgroundColor: "#252525",
+    paddingHorizontal: 9,
+    paddingVertical: 6,
+    borderRadius: 9,
+  },
+
+  ownerBadge: {
+    backgroundColor: "#252D20",
+    borderWidth: 1,
+    borderColor: "#46543A",
+  },
+
+  roleText: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#999999",
+  },
+
   ownerText: {
-    color: "#557361",
+    color: "#B6F36B",
   },
+
   memberProgress: {
-    marginTop: 15,
+    marginTop: 19,
   },
+
   calorieNumbers: {
     flexDirection: "row",
-    alignItems: "baseline",
-    flexWrap: "wrap",
-    gap: 6,
-    marginBottom: 10,
-  },
-  caloriesConsumed: {
-    color: "#202923",
-    fontSize: 23,
-    fontWeight: "700",
-    letterSpacing: -0.4,
-  },
-  calorieGoal: {
-    color: "#879189",
-    fontSize: 13,
-  },
-  progressPercentage: {
-    color: "#557361",
-    fontSize: 14,
-    fontWeight: "700",
-    marginLeft: "auto",
-  },
-  progressTrack: {
-    height: 6,
-    backgroundColor: "#EDF1ED",
-    borderRadius: 6,
-    overflow: "hidden",
-  },
-  progressFill: {
-    height: "100%",
-    backgroundColor: "#729580",
-    borderRadius: 6,
-  },
-  goalReached: {
-    color: "#557361",
-    fontSize: 12,
-    fontWeight: "600",
-    marginTop: 8,
-  },
-  progressError: {
-    color: "#B91C1C",
-    fontSize: 13,
+    alignItems: "center",
+    justifyContent: "space-between",
     marginBottom: 12,
   },
-  emptyCard: {
-    padding: 22,
-    borderRadius: 14,
-    backgroundColor: "#FFFFFF",
-    alignItems: "center",
-  },
-  button: {
-    backgroundColor: "#557361",
-    padding: 15,
-    borderRadius: 13,
-    alignItems: "center",
-    marginTop: 22,
-  },
-  buttonText: {
+
+  caloriesConsumed: {
     color: "#FFFFFF",
-    fontSize: 15,
+    fontSize: 25,
+    fontWeight: "800",
+    letterSpacing: -0.6,
+  },
+
+  kcalLabel: {
+    color: "#888888",
+    fontSize: 12,
+    fontWeight: "500",
+  },
+
+  calorieGoal: {
+    color: "#888888",
+    fontSize: 12,
+    marginTop: 4,
+  },
+
+  percentageBadge: {
+    backgroundColor: "#252D20",
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+
+  progressPercentage: {
+    color: "#B6F36B",
+    fontSize: 13,
+    fontWeight: "800",
+  },
+
+  progressTrack: {
+    height: 8,
+    backgroundColor: "#303030",
+    borderRadius: 8,
+    overflow: "hidden",
+  },
+
+  progressFill: {
+    height: "100%",
+    backgroundColor: "#B6F36B",
+    borderRadius: 8,
+  },
+
+  goalReachedRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginTop: 10,
+  },
+
+  goalReached: {
+    color: "#B6F36B",
+    fontSize: 12,
     fontWeight: "700",
   },
-  footer: {
-    textAlign: "center",
-    fontSize: 12,
-    lineHeight: 18,
-    color: "#879189",
-    marginTop: 18,
+
+  emptyCard: {
+    padding: 26,
+    borderRadius: 18,
+    backgroundColor: "#1A1A1A",
+    borderWidth: 1,
+    borderColor: "#303030",
+    alignItems: "center",
   },
+
+  emptyTitle: {
+    color: "#FFFFFF",
+    fontSize: 16,
+    fontWeight: "700",
+    marginTop: 14,
+  },
+
+  emptyDescription: {
+    color: "#888888",
+    fontSize: 13,
+    textAlign: "center",
+    lineHeight: 19,
+    marginTop: 7,
+  },
+
+  historyHintRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: 5,
+    marginTop: 16,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: "#303030",
+  },
+
+  historyHint: {
+    color: "#B6F36B",
+    fontSize: 12,
+    fontWeight: "700",
+  },
+
+  inviteButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 9,
+    backgroundColor: "#B6F36B",
+    padding: 16,
+    borderRadius: 14,
+    marginTop: 13,
+  },
+
+  inviteButtonPressed: {
+    opacity: 0.8,
+  },
+
+  inviteButtonText: {
+    color: "#101010",
+    fontSize: 15,
+    fontWeight: "800",
+  },
+
+  privacyNote: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "center",
+    gap: 8,
+    marginTop: 20,
+    paddingHorizontal: 10,
+  },
+
+  footer: {
+    flex: 1,
+    textAlign: "center",
+    fontSize: 11,
+    lineHeight: 17,
+    color: "#777777",
+  },
+
+  primaryButton: {
+    backgroundColor: "#B6F36B",
+    paddingHorizontal: 24,
+    paddingVertical: 13,
+    borderRadius: 12,
+    marginTop: 22,
+  },
+
+  primaryButtonText: {
+    color: "#101010",
+    fontWeight: "800",
+    fontSize: 14,
+  },
+
+  // Invite modal
   modalOverlay: {
     flex: 1,
     justifyContent: "flex-end",
   },
+
   modalBackdrop: {
     ...StyleSheet.absoluteFill,
-    backgroundColor: "rgba(15, 23, 42, 0.48)",
+    backgroundColor: "rgba(0, 0, 0, 0.72)",
   },
-  modalContent: {
-    backgroundColor: "#FFFFFF",
-    paddingHorizontal: 24,
-    paddingTop: 12,
-    paddingBottom: Platform.OS === "ios" ? 34 : 24,
+
+  modalSafeArea: {
+    backgroundColor: "#1A1A1A",
     borderTopLeftRadius: 26,
     borderTopRightRadius: 26,
+    overflow: "hidden",
+  },
+
+  modalContent: {
+    backgroundColor: "#1A1A1A",
+    paddingHorizontal: 22,
+    paddingTop: 12,
+    paddingBottom: 12,
     maxHeight: "90%",
   },
+
   modalHandle: {
     width: 42,
     height: 5,
     borderRadius: 3,
-    backgroundColor: "#D1D5DB",
+    backgroundColor: "#484848",
     alignSelf: "center",
-    marginBottom: 22,
+    marginBottom: 20,
   },
+
+  modalHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+
+  modalIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 15,
+    backgroundColor: "#252D20",
+    borderWidth: 1,
+    borderColor: "#46543A",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  closeButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 12,
+    backgroundColor: "#252525",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
   modalTitle: {
-    color: "#202923",
-    fontSize: 24,
+    color: "#FFFFFF",
+    fontSize: 23,
     fontWeight: "800",
+    marginTop: 18,
   },
+
   modalDescription: {
-    color: "#6B7280",
-    fontSize: 14,
-    lineHeight: 21,
-    marginTop: 8,
-    marginBottom: 24,
+    color: "#999999",
+    fontSize: 13,
+    lineHeight: 20,
+    marginTop: 7,
+    marginBottom: 23,
   },
+
   inputLabel: {
-    color: "#374151",
+    color: "#AAAAAA",
     fontSize: 11,
+    fontWeight: "800",
+    letterSpacing: 1,
+    marginBottom: 9,
+  },
+
+  inputContainer: {
+    height: 53,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingHorizontal: 14,
+    borderWidth: 1,
+    borderColor: "#383838",
+    borderRadius: 13,
+    backgroundColor: "#101010",
+  },
+
+  input: {
+    flex: 1,
+    height: "100%",
+    fontSize: 14,
+    color: "#FFFFFF",
+  },
+
+  searchStatusText: {
+    color: "#999999",
+    fontSize: 12,
+    marginTop: 12,
+    lineHeight: 18,
+  },
+
+  errorText: {
+    color: "#FF8A8A",
+    fontSize: 12,
+    marginTop: 10,
+    lineHeight: 18,
+  },
+
+  resultsContainer: {
+    marginTop: 19,
+  },
+
+  resultsTitle: {
+    color: "#999999",
+    fontSize: 10,
     fontWeight: "800",
     letterSpacing: 1,
     marginBottom: 8,
   },
-  input: {
-    height: 52,
-    paddingHorizontal: 15,
-    borderWidth: 1,
-    borderColor: "#D1D5DB",
-    borderRadius: 12,
-    fontSize: 15,
-    color: "#111827",
-    backgroundColor: "#FFFFFF",
-  },
-  searchStatus: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-    marginTop: 12,
-  },
-  searchStatusText: {
-    color: "#64748B",
-    fontSize: 13,
-    marginTop: 10,
-  },
-  errorText: {
-    color: "#B91C1C",
-    fontSize: 13,
-    marginTop: 10,
-  },
-  resultsContainer: {
-    marginTop: 18,
-  },
-  resultsTitle: {
-    color: "#374151",
-    fontSize: 12,
-    fontWeight: "800",
-    letterSpacing: 0.5,
-    marginBottom: 8,
-  },
+
   resultRow: {
     flexDirection: "row",
     alignItems: "center",
-    paddingVertical: 10,
+    paddingVertical: 11,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: "#E5E7EB",
+    borderBottomColor: "#383838",
   },
+
   resultAvatar: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: "#EAF0EB",
+    width: 40,
+    height: 40,
+    borderRadius: 13,
+    backgroundColor: "#252D20",
     alignItems: "center",
     justifyContent: "center",
-    marginRight: 10,
+    marginRight: 11,
   },
+
   resultAvatarText: {
-    color: "#557361",
-    fontWeight: "700",
+    color: "#B6F36B",
+    fontWeight: "800",
     fontSize: 15,
   },
+
   resultInfo: {
     flex: 1,
   },
+
   resultName: {
-    color: "#202923",
+    color: "#FFFFFF",
     fontSize: 14,
-    fontWeight: "600",
+    fontWeight: "700",
   },
+
   selectLabel: {
-    color: "#557361",
+    color: "#B6F36B",
     fontSize: 12,
     fontWeight: "700",
   },
+
+  sendButton: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 9,
+    backgroundColor: "#B6F36B",
+    padding: 15,
+    borderRadius: 13,
+    marginTop: 22,
+  },
+
+  sendButtonText: {
+    color: "#101010",
+    fontSize: 14,
+    fontWeight: "800",
+  },
+
   disabledButton: {
     opacity: 0.6,
   },
+
   cancelButton: {
-    height: 46,
+    height: 45,
     alignItems: "center",
     justifyContent: "center",
-    marginTop: 6,
+    marginTop: 5,
   },
+
   cancelButtonText: {
-    color: "#6B7280",
-    fontSize: 14,
+    color: "#999999",
+    fontSize: 13,
     fontWeight: "700",
   },
 });

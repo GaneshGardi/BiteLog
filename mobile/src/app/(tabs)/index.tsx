@@ -71,6 +71,8 @@ export default function HomeScreen() {
     try {
       const user = await getCurrentUser();
 
+      
+
       if (!user) {
         setLoading(false);
         return;

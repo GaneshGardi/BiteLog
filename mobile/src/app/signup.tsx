@@ -1,4 +1,5 @@
-import { useState } from 'react';
+
+import { useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -10,47 +11,70 @@ import {
   Text,
   TextInput,
   View,
-} from 'react-native';
-import { router } from 'expo-router';
+} from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import { router } from "expo-router";
 
-import { supabase } from '../lib/supabase';
+import { supabase } from "../lib/supabase";
+
+const C = {
+  background: "#101010",
+  card: "#1A1A1A",
+  input: "#141414",
+  accent: "#B6F36B",
+  text: "#FFFFFF",
+  secondary: "#999999",
+  muted: "#707070",
+  border: "#303030",
+};
 
 export default function SignupScreen() {
-  const [email, setEmail] = useState('');
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
+  const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [passwordVisible, setPasswordVisible] = useState(false);
+  const [confirmPasswordVisible, setConfirmPasswordVisible] =
+    useState(false);
   const [loading, setLoading] = useState(false);
 
   const handleSignup = async () => {
     const cleanEmail = email.trim().toLowerCase();
     const cleanUsername = username.trim().toLowerCase();
 
-    if (!cleanEmail || !cleanUsername || !password || !confirmPassword) {
-      Alert.alert('Missing information', 'Please fill in all fields.');
+    if (
+      !cleanEmail ||
+      !cleanUsername ||
+      !password ||
+      !confirmPassword
+    ) {
+      Alert.alert(
+        "Missing information",
+        "Please fill in all fields."
+      );
       return;
     }
 
     if (cleanUsername.length < 3) {
       Alert.alert(
-        'Invalid username',
-        'Username must be at least 3 characters.'
+        "Invalid username",
+        "Username must be at least 3 characters."
       );
       return;
     }
 
     if (password.length < 6) {
       Alert.alert(
-        'Invalid password',
-        'Password must be at least 6 characters.'
+        "Invalid password",
+        "Password must be at least 6 characters."
       );
       return;
     }
 
     if (password !== confirmPassword) {
       Alert.alert(
-        'Passwords do not match',
-        'Please make sure both passwords are the same.'
+        "Passwords do not match",
+        "Please make sure both passwords are the same."
       );
       return;
     }
@@ -62,43 +86,44 @@ export default function SignupScreen() {
         email: cleanEmail,
         password,
         options: {
-            data: {
-                username: cleanUsername,
-            },
+          data: {
+            username: cleanUsername,
+          },
         },
       });
 
       if (error) {
-        Alert.alert('Signup failed', error.message);
+        Alert.alert("Signup failed", error.message);
         return;
       }
 
-      console.log('SIGNUP SESSION:', data.session);
-      console.log('SIGNUP USER:', data.user);
+      console.log("SIGNUP SESSION:", data.session);
+      console.log("SIGNUP USER:", data.user);
+
       if (!data.user) {
         Alert.alert(
-          'Signup failed',
-          'The account could not be created.'
+          "Signup failed",
+          "The account could not be created."
         );
         return;
       }
 
       Alert.alert(
-        'Account created',
+        "Account created",
         `Welcome, ${cleanUsername}!`,
         [
           {
-            text: 'Continue',
-            onPress: () => router.replace('/'),
+            text: "Continue",
+            onPress: () => router.replace("/"),
           },
         ]
       );
     } catch (error) {
-      console.error('Signup error:', error);
+      console.error("Signup error:", error);
 
       Alert.alert(
-        'Something went wrong',
-        'Please try again.'
+        "Something went wrong",
+        "Please try again."
       );
     } finally {
       setLoading(false);
@@ -108,80 +133,195 @@ export default function SignupScreen() {
   return (
     <KeyboardAvoidingView
       style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
       <ScrollView
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
       >
+        {/* Brand */}
+        <View style={styles.brand}>
+          <View style={styles.brandIcon}>
+            <Ionicons
+              name="nutrition"
+              size={25}
+              color={C.background}
+            />
+          </View>
+
+          <Text style={styles.brandName}>
+            fun<Text style={styles.brandAccent}>tracker</Text>
+          </Text>
+        </View>
+
+        {/* Heading */}
         <View style={styles.header}>
-          <Text style={styles.title}>Create your account</Text>
+          <Text style={styles.eyebrow}>
+            YOUR JOURNEY STARTS HERE
+          </Text>
+
+          <Text style={styles.title}>
+            Create your{"\n"}account.
+          </Text>
 
           <Text style={styles.subtitle}>
-            Start tracking your calories with FunTracker.
+            Join funTracker and take control of your daily
+            nutrition, one meal at a time.
           </Text>
         </View>
 
         <View style={styles.form}>
-          <Text style={styles.label}>Email</Text>
+          {/* Email */}
+          <Text style={styles.label}>Email address</Text>
 
-          <TextInput
-            style={styles.input}
-            placeholder="you@example.com"
-            placeholderTextColor="#888"
-            value={email}
-            onChangeText={setEmail}
-            autoCapitalize="none"
-            autoCorrect={false}
-            keyboardType="email-address"
-            editable={!loading}
-          />
+          <View style={styles.inputContainer}>
+            <Ionicons
+              name="mail-outline"
+              size={19}
+              color={C.muted}
+            />
 
+            <TextInput
+              style={styles.input}
+              placeholder="you@example.com"
+              placeholderTextColor={C.muted}
+              value={email}
+              onChangeText={setEmail}
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="email-address"
+              editable={!loading}
+            />
+          </View>
+
+          {/* Username */}
           <Text style={styles.label}>Username</Text>
 
-          <TextInput
-            style={styles.input}
-            placeholder="Choose a username"
-            placeholderTextColor="#888"
-            value={username}
-            onChangeText={setUsername}
-            autoCapitalize="none"
-            autoCorrect={false}
-            editable={!loading}
-          />
+          <View style={styles.inputContainer}>
+            <Ionicons
+              name="at-outline"
+              size={19}
+              color={C.muted}
+            />
 
-          <Text style={styles.helper}>
-            This is the name your friends will see.
-          </Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Choose a username"
+              placeholderTextColor={C.muted}
+              value={username}
+              onChangeText={setUsername}
+              autoCapitalize="none"
+              autoCorrect={false}
+              editable={!loading}
+            />
+          </View>
 
+          <View style={styles.helperContainer}>
+            <Ionicons
+              name="people-outline"
+              size={14}
+              color={C.accent}
+            />
+
+            <Text style={styles.helper}>
+              This is the name your friends will see.
+            </Text>
+          </View>
+
+          {/* Password */}
           <Text style={styles.label}>Password</Text>
 
-          <TextInput
-            style={styles.input}
-            placeholder="Create a password"
-            placeholderTextColor="#888"
-            value={password}
-            onChangeText={setPassword}
-            secureTextEntry
-            autoCapitalize="none"
-            autoCorrect={false}
-            editable={!loading}
-          />
+          <View style={styles.inputContainer}>
+            <Ionicons
+              name="lock-closed-outline"
+              size={19}
+              color={C.muted}
+            />
 
-          <Text style={styles.label}>Confirm password</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Create a password"
+              placeholderTextColor={C.muted}
+              value={password}
+              onChangeText={setPassword}
+              secureTextEntry={!passwordVisible}
+              autoCapitalize="none"
+              autoCorrect={false}
+              editable={!loading}
+            />
 
-          <TextInput
-            style={styles.input}
-            placeholder="Enter password again"
-            placeholderTextColor="#888"
-            value={confirmPassword}
-            onChangeText={setConfirmPassword}
-            secureTextEntry
-            autoCapitalize="none"
-            autoCorrect={false}
-            editable={!loading}
-          />
+            <Pressable
+              onPress={() =>
+                setPasswordVisible(!passwordVisible)
+              }
+              disabled={loading}
+              hitSlop={10}
+            >
+              <Ionicons
+                name={
+                  passwordVisible
+                    ? "eye-off-outline"
+                    : "eye-outline"
+                }
+                size={20}
+                color={C.muted}
+              />
+            </Pressable>
+          </View>
 
+          <Text style={styles.passwordHint}>
+            Use at least 6 characters.
+          </Text>
+
+          {/* Confirm password */}
+          <Text style={styles.label}>
+            Confirm password
+          </Text>
+
+          <View style={styles.inputContainer}>
+            <Ionicons
+              name="shield-checkmark-outline"
+              size={19}
+              color={C.muted}
+            />
+
+            <TextInput
+              style={styles.input}
+              placeholder="Enter password again"
+              placeholderTextColor={C.muted}
+              value={confirmPassword}
+              onChangeText={setConfirmPassword}
+              secureTextEntry={!confirmPasswordVisible}
+              autoCapitalize="none"
+              autoCorrect={false}
+              editable={!loading}
+              onSubmitEditing={handleSignup}
+              returnKeyType="done"
+            />
+
+            <Pressable
+              onPress={() =>
+                setConfirmPasswordVisible(
+                  !confirmPasswordVisible
+                )
+              }
+              disabled={loading}
+              hitSlop={10}
+            >
+              <Ionicons
+                name={
+                  confirmPasswordVisible
+                    ? "eye-off-outline"
+                    : "eye-outline"
+                }
+                size={20}
+                color={C.muted}
+              />
+            </Pressable>
+          </View>
+
+          {/* Create account */}
           <Pressable
             style={({ pressed }) => [
               styles.button,
@@ -192,20 +332,49 @@ export default function SignupScreen() {
             disabled={loading}
           >
             {loading ? (
-              <ActivityIndicator color="#fff" />
+              <ActivityIndicator color={C.background} />
             ) : (
-              <Text style={styles.buttonText}>Create account</Text>
+              <>
+                <Text style={styles.buttonText}>
+                  Create account
+                </Text>
+
+                <Ionicons
+                  name="arrow-forward"
+                  size={19}
+                  color={C.background}
+                />
+              </>
             )}
           </Pressable>
 
+          {/* Login */}
           <Pressable
+            style={styles.loginContainer}
             onPress={() => router.back()}
             disabled={loading}
           >
             <Text style={styles.loginText}>
-              Already have an account? Log in
+              Already have an account?{" "}
+            </Text>
+
+            <Text style={styles.loginLink}>
+              Log in
             </Text>
           </Pressable>
+
+          {/* Footer */}
+          <View style={styles.footer}>
+            <Ionicons
+              name="shield-checkmark-outline"
+              size={14}
+              color={C.muted}
+            />
+
+            <Text style={styles.footerText}>
+              Your information stays private.
+            </Text>
+          </View>
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -215,73 +384,140 @@ export default function SignupScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: C.background,
   },
 
   content: {
     flexGrow: 1,
-    justifyContent: 'center',
-    paddingHorizontal: 24,
-    paddingVertical: 40,
+    justifyContent: "center",
+    paddingHorizontal: 26,
+    paddingTop: 45,
+    paddingBottom: 35,
   },
 
+  // Brand
+  brand: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 11,
+    marginBottom: 38,
+  },
+
+  brandIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 14,
+    backgroundColor: C.accent,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  brandName: {
+    color: C.text,
+    fontSize: 21,
+    fontWeight: "900",
+    letterSpacing: -0.8,
+  },
+
+  brandAccent: {
+    color: C.accent,
+  },
+
+  // Heading
   header: {
-    marginBottom: 32,
+    marginBottom: 27,
+  },
+
+  eyebrow: {
+    color: C.accent,
+    fontSize: 10,
+    fontWeight: "800",
+    letterSpacing: 1.8,
+    marginBottom: 11,
   },
 
   title: {
-    fontSize: 30,
-    fontWeight: '700',
-    color: '#111',
+    fontSize: 34,
+    lineHeight: 41,
+    fontWeight: "900",
+    letterSpacing: -1,
+    color: C.text,
   },
 
   subtitle: {
-    marginTop: 8,
-    fontSize: 16,
-    lineHeight: 23,
-    color: '#666',
+    marginTop: 11,
+    fontSize: 13,
+    lineHeight: 21,
+    color: C.secondary,
   },
 
+  // Form
   form: {
-    width: '100%',
+    width: "100%",
   },
 
   label: {
-    marginBottom: 8,
-    marginTop: 18,
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#222',
+    marginBottom: 9,
+    marginTop: 19,
+    fontSize: 12,
+    fontWeight: "700",
+    color: C.text,
+  },
+
+  inputContainer: {
+    minHeight: 54,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingHorizontal: 14,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 13,
+    backgroundColor: C.input,
   },
 
   input: {
+    flex: 1,
     height: 52,
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    fontSize: 16,
-    color: '#111',
-    backgroundColor: '#fafafa',
+    fontSize: 14,
+    color: C.text,
+    paddingVertical: 0,
+  },
+
+  // Helper text
+  helperContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+    marginTop: 8,
   },
 
   helper: {
-    marginTop: 6,
-    fontSize: 13,
-    color: '#777',
+    fontSize: 11,
+    color: C.secondary,
   },
 
+  passwordHint: {
+    marginTop: 7,
+    fontSize: 10,
+    color: C.muted,
+  },
+
+  // Button
   button: {
-    height: 52,
+    height: 55,
     marginTop: 30,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#111',
+    borderRadius: 14,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 10,
+    backgroundColor: C.accent,
   },
 
   buttonPressed: {
     opacity: 0.8,
+    transform: [{ scale: 0.99 }],
   },
 
   buttonDisabled: {
@@ -289,15 +525,41 @@ const styles = StyleSheet.create({
   },
 
   buttonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '700',
+    color: C.background,
+    fontSize: 15,
+    fontWeight: "900",
+  },
+
+  // Login link
+  loginContainer: {
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
+    marginTop: 24,
   },
 
   loginText: {
-    marginTop: 22,
-    textAlign: 'center',
-    fontSize: 15,
-    color: '#333',
+    color: C.secondary,
+    fontSize: 12,
+  },
+
+  loginLink: {
+    color: C.accent,
+    fontSize: 12,
+    fontWeight: "800",
+  },
+
+  // Footer
+  footer: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+    marginTop: 25,
+  },
+
+  footerText: {
+    color: C.muted,
+    fontSize: 10,
   },
 });

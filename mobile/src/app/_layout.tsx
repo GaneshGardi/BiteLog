@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react';
-import { Stack, useRouter, useSegments } from 'expo-router';
-import { supabase } from '../lib/supabase';
+
+import { useEffect, useState } from "react";
+import { Stack, useRouter, useSegments } from "expo-router";
+import { supabase } from "../lib/supabase";
 
 export default function RootLayout() {
   const router = useRouter();
@@ -25,7 +26,7 @@ export default function RootLayout() {
       if (!mounted) return;
 
       if (error) {
-        console.error('Failed to restore auth session:', error);
+        console.error("Failed to restore auth session:", error);
       }
 
       setIsAuthenticated(!!session);
@@ -42,11 +43,17 @@ export default function RootLayout() {
     if (sessionLoading) return;
 
     const currentRoute = segments[0];
+
     const isAuthRoute =
-      currentRoute === 'login' || currentRoute === 'signup';
+      currentRoute === "login" || currentRoute === "signup";
 
     if (!isAuthenticated && !isAuthRoute) {
-      router.replace('/login');
+      router.replace("/login");
+      return;
+    }
+
+    if (isAuthenticated && isAuthRoute) {
+      router.replace("/(tabs)");
     }
   }, [isAuthenticated, sessionLoading, segments, router]);
 
@@ -54,5 +61,14 @@ export default function RootLayout() {
     return null;
   }
 
-  return <Stack screenOptions={{ headerShown: false }} />;
+  return (
+    <Stack
+      screenOptions={{
+        headerShown: false,
+        contentStyle: {
+          backgroundColor: "#101010",
+        },
+      }}
+    />
+  );
 }

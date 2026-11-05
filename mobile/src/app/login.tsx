@@ -1,3 +1,4 @@
+
 import { useState } from "react";
 import {
   ActivityIndicator,
@@ -11,14 +12,27 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 
 import { supabase } from "../lib/supabase";
+
+const C = {
+  background: "#101010",
+  card: "#1A1A1A",
+  input: "#141414",
+  accent: "#B6F36B",
+  text: "#FFFFFF",
+  secondary: "#999999",
+  muted: "#707070",
+  border: "#303030",
+};
 
 export default function LoginScreen() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [passwordVisible, setPasswordVisible] = useState(false);
 
   const handleLogin = async () => {
     const cleanEmail = email.trim().toLowerCase();
@@ -26,7 +40,7 @@ export default function LoginScreen() {
     if (!cleanEmail || !password) {
       Alert.alert(
         "Missing information",
-        "Please enter your email and password.",
+        "Please enter your email and password."
       );
       return;
     }
@@ -34,10 +48,11 @@ export default function LoginScreen() {
     setLoading(true);
 
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email: cleanEmail,
-        password,
-      });
+      const { data, error } =
+        await supabase.auth.signInWithPassword({
+          email: cleanEmail,
+          password,
+        });
 
       if (error) {
         Alert.alert("Login failed", error.message);
@@ -50,24 +65,29 @@ export default function LoginScreen() {
       if (!data.session) {
         Alert.alert(
           "Login failed",
-          "Login succeeded but no session was created.",
+          "Login succeeded but no session was created."
         );
         return;
       }
 
-      const { data: existingGoal, error: goalError } = await supabase
-        .from("calorie_goals")
-        .select("daily_calories")
-        .eq("user_id", data.user.id)
-        .order("effective_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
+      const { data: existingGoal, error: goalError } =
+        await supabase
+          .from("calorie_goals")
+          .select("daily_calories")
+          .eq("user_id", data.user.id)
+          .order("effective_at", { ascending: false })
+          .limit(1)
+          .maybeSingle();
 
       if (goalError) {
-        console.error("Failed to check existing calorie goal:", goalError);
+        console.error(
+          "Failed to check existing calorie goal:",
+          goalError
+        );
+
         Alert.alert(
           "Could not load calorie goal",
-          "Please try logging in again.",
+          "Please try logging in again."
         );
         return;
       }
@@ -80,7 +100,10 @@ export default function LoginScreen() {
     } catch (error) {
       console.error("Login error:", error);
 
-      Alert.alert("Something went wrong", "Please try again.");
+      Alert.alert(
+        "Something went wrong",
+        "Please try again."
+      );
     } finally {
       setLoading(false);
     }
@@ -94,44 +117,104 @@ export default function LoginScreen() {
       <ScrollView
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
       >
+        {/* Brand */}
+        <View style={styles.brand}>
+          <View style={styles.brandIcon}>
+            <Ionicons
+              name="nutrition"
+              size={27}
+              color={C.background}
+            />
+          </View>
+
+          <Text style={styles.brandName}>
+            fun<Text style={styles.brandAccent}>tracker</Text>
+          </Text>
+        </View>
+
+        {/* Heading */}
         <View style={styles.header}>
-          <Text style={styles.title}>Welcome back</Text>
+          <Text style={styles.eyebrow}>WELCOME BACK</Text>
+
+          <Text style={styles.title}>
+            Good to see{"\n"}you again.
+          </Text>
 
           <Text style={styles.subtitle}>
             Log in to continue tracking your progress.
           </Text>
         </View>
 
+        {/* Login form */}
         <View style={styles.form}>
-          <Text style={styles.label}>Email</Text>
+          <Text style={styles.label}>Email address</Text>
 
-          <TextInput
-            style={styles.input}
-            placeholder="you@example.com"
-            placeholderTextColor="#888"
-            value={email}
-            onChangeText={setEmail}
-            autoCapitalize="none"
-            autoCorrect={false}
-            keyboardType="email-address"
-            editable={!loading}
-          />
+          <View style={styles.inputContainer}>
+            <Ionicons
+              name="mail-outline"
+              size={19}
+              color={C.muted}
+            />
+
+            <TextInput
+              style={styles.input}
+              placeholder="you@example.com"
+              placeholderTextColor={C.muted}
+              value={email}
+              onChangeText={setEmail}
+              autoCapitalize="none"
+              autoCorrect={false}
+              keyboardType="email-address"
+              editable={!loading}
+              returnKeyType="next"
+            />
+          </View>
 
           <Text style={styles.label}>Password</Text>
 
-          <TextInput
-            style={styles.input}
-            placeholder="Enter your password"
-            placeholderTextColor="#888"
-            value={password}
-            onChangeText={setPassword}
-            secureTextEntry
-            autoCapitalize="none"
-            autoCorrect={false}
-            editable={!loading}
-          />
+          <View style={styles.inputContainer}>
+            <Ionicons
+              name="lock-closed-outline"
+              size={19}
+              color={C.muted}
+            />
 
+            <TextInput
+              style={styles.input}
+              placeholder="Enter your password"
+              placeholderTextColor={C.muted}
+              value={password}
+              onChangeText={setPassword}
+              secureTextEntry={!passwordVisible}
+              autoCapitalize="none"
+              autoCorrect={false}
+              editable={!loading}
+              returnKeyType="go"
+              onSubmitEditing={handleLogin}
+            />
+
+            <Pressable
+              onPress={() =>
+                setPasswordVisible((visible) => !visible)
+              }
+              disabled={loading}
+              hitSlop={10}
+            >
+              <Ionicons
+                name={
+                  passwordVisible
+                    ? "eye-off-outline"
+                    : "eye-outline"
+                }
+                size={19}
+                color={C.muted}
+              />
+            </Pressable>
+          </View>
+
+          {/* Login button */}
           <Pressable
             style={({ pressed }) => [
               styles.button,
@@ -142,17 +225,51 @@ export default function LoginScreen() {
             disabled={loading}
           >
             {loading ? (
-              <ActivityIndicator color="#fff" />
+              <ActivityIndicator color={C.background} />
             ) : (
-              <Text style={styles.buttonText}>Log in</Text>
+              <>
+                <Text style={styles.buttonText}>
+                  Log in
+                </Text>
+
+                <Ionicons
+                  name="arrow-forward"
+                  size={19}
+                  color={C.background}
+                />
+              </>
             )}
           </Pressable>
 
-          <Pressable onPress={() => router.push("/signup")} disabled={loading}>
-            <Text style={styles.signupText}>
-              Don't have an account? Create one
+          {/* Signup */}
+          <View style={styles.signupContainer}>
+            <Text style={styles.signupPrompt}>
+              Don't have an account?
             </Text>
-          </Pressable>
+
+            <Pressable
+              onPress={() => router.push("/signup")}
+              disabled={loading}
+              hitSlop={8}
+            >
+              <Text style={styles.signupLink}>
+                Create one
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+
+        {/* Footer */}
+        <View style={styles.footer}>
+          <Ionicons
+            name="shield-checkmark-outline"
+            size={14}
+            color={C.muted}
+          />
+
+          <Text style={styles.footerText}>
+            Your progress. Your journey. Your data.
+          </Text>
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -162,67 +279,121 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#fff",
+    backgroundColor: C.background,
   },
 
   content: {
     flexGrow: 1,
     justifyContent: "center",
-    paddingHorizontal: 24,
-    paddingVertical: 40,
+    paddingHorizontal: 26,
+    paddingTop: 55,
+    paddingBottom: 30,
   },
 
+  // Brand
+  brand: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 11,
+    marginBottom: 58,
+  },
+
+  brandIcon: {
+    width: 43,
+    height: 43,
+    borderRadius: 14,
+    backgroundColor: C.accent,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  brandName: {
+    color: C.text,
+    fontSize: 21,
+    fontWeight: "900",
+    letterSpacing: -0.8,
+  },
+
+  brandAccent: {
+    color: C.accent,
+  },
+
+  // Heading
   header: {
-    marginBottom: 32,
+    marginBottom: 34,
+  },
+
+  eyebrow: {
+    color: C.accent,
+    fontSize: 10,
+    fontWeight: "800",
+    letterSpacing: 2,
+    marginBottom: 12,
   },
 
   title: {
-    fontSize: 30,
-    fontWeight: "700",
-    color: "#111",
+    fontSize: 36,
+    lineHeight: 43,
+    fontWeight: "900",
+    letterSpacing: -1.2,
+    color: C.text,
   },
 
   subtitle: {
-    marginTop: 8,
-    fontSize: 16,
-    lineHeight: 23,
-    color: "#666",
+    marginTop: 12,
+    fontSize: 14,
+    lineHeight: 22,
+    color: C.secondary,
   },
 
+  // Form
   form: {
     width: "100%",
   },
 
   label: {
-    marginBottom: 8,
-    marginTop: 18,
-    fontSize: 15,
-    fontWeight: "600",
-    color: "#222",
+    marginBottom: 9,
+    marginTop: 19,
+    fontSize: 12,
+    fontWeight: "700",
+    color: C.text,
+  },
+
+  inputContainer: {
+    minHeight: 56,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    paddingHorizontal: 15,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 13,
+    backgroundColor: C.input,
   },
 
   input: {
-    height: 52,
-    borderWidth: 1,
-    borderColor: "#ddd",
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    fontSize: 16,
-    color: "#111",
-    backgroundColor: "#fafafa",
+    flex: 1,
+    height: 54,
+    fontSize: 14,
+    color: C.text,
+    paddingVertical: 0,
   },
 
+  // Button
   button: {
-    height: 52,
-    marginTop: 30,
-    borderRadius: 12,
+    height: 56,
+    marginTop: 31,
+    borderRadius: 14,
+    flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: "#111",
+    gap: 10,
+    backgroundColor: C.accent,
   },
 
   buttonPressed: {
     opacity: 0.8,
+    transform: [{ scale: 0.99 }],
   },
 
   buttonDisabled: {
@@ -230,15 +401,42 @@ const styles = StyleSheet.create({
   },
 
   buttonText: {
-    color: "#fff",
-    fontSize: 16,
-    fontWeight: "700",
+    color: C.background,
+    fontSize: 15,
+    fontWeight: "900",
   },
 
-  signupText: {
-    marginTop: 22,
-    textAlign: "center",
-    fontSize: 15,
-    color: "#333",
+  // Signup
+  signupContainer: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 5,
+    marginTop: 27,
+  },
+
+  signupPrompt: {
+    color: C.secondary,
+    fontSize: 13,
+  },
+
+  signupLink: {
+    color: C.accent,
+    fontSize: 13,
+    fontWeight: "800",
+  },
+
+  // Footer
+  footer: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+    marginTop: 55,
+  },
+
+  footerText: {
+    color: C.muted,
+    fontSize: 10,
   },
 });

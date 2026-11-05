@@ -3,10 +3,12 @@ import { useCallback, useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   View,
 } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "expo-router";
 import { supabase } from "../lib/supabase";
 
@@ -28,14 +30,14 @@ type GroupWeeklyHistoryProps = {
 const C = {
   background: "#101010",
   card: "#1A1A1A",
-  input: "#141414",
+  elevated: "#222222",
   accent: "#B6F36B",
   text: "#FFFFFF",
-  secondary: "#A0A0A0",
+  secondary: "#999999",
   muted: "#707070",
   border: "#303030",
-  danger: "#FF7777",
   goal: "#D8B66A",
+  danger: "#FF7777",
 };
 
 const getLocalDateString = (date: Date) => {
@@ -47,10 +49,13 @@ const getLocalDateString = (date: Date) => {
 };
 
 const getDateLabel = (dateString: string) => {
+  // Noon avoids timezone shifts around midnight.
   const date = new Date(`${dateString}T12:00:00`);
 
   return {
-    weekday: date.toLocaleDateString(undefined, { weekday: "short" }),
+    weekday: date.toLocaleDateString(undefined, {
+      weekday: "short",
+    }),
     date: date.toLocaleDateString(undefined, {
       day: "numeric",
       month: "short",
@@ -63,9 +68,22 @@ const getDateLabel = (dateString: string) => {
   };
 };
 
-const getCalories = (value: number | string | null | undefined) => {
+const getCalories = (
+  value: number | string | null | undefined
+) => {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? Math.max(0, parsed) : 0;
+};
+
+const formatCalories = (value: number) =>
+  Math.round(value).toLocaleString();
+
+const formatCompactCalories = (value: number) => {
+  if (value >= 1000) {
+    return `${(value / 1000).toFixed(1)}k`;
+  }
+
+  return Math.round(value).toString();
 };
 
 export default function GroupWeeklyHistory({
@@ -96,7 +114,8 @@ export default function GroupWeeklyHistory({
       const startDate = getLocalDateString(start);
 
       const timezone =
-        Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Kolkata";
+        Intl.DateTimeFormat().resolvedOptions().timeZone ||
+        "Asia/Kolkata";
 
       const { data, error: fetchError } = await supabase.rpc(
         "get_group_weekly_history",
@@ -116,7 +135,9 @@ export default function GroupWeeklyHistory({
         rows
           .filter((row) => row.user_id === memberId)
           .slice()
-          .sort((a, b) => a.log_date.localeCompare(b.log_date))
+          .sort((a, b) =>
+            a.log_date.localeCompare(b.log_date)
+          )
       );
     } catch (err) {
       console.error("Failed to load member weekly history:", err);
@@ -139,21 +160,22 @@ export default function GroupWeeklyHistory({
   const selectedMember = selectedDays[0];
 
   const totalCalories = selectedDays.reduce(
-    (sum, day) => sum + getCalories(day.calories_consumed),
+    (sum, day) =>
+      sum + getCalories(day.calories_consumed),
     0
   );
 
   const averageCalories =
-    selectedDays.length > 0 ? totalCalories / selectedDays.length : 0;
+    selectedDays.length > 0
+      ? totalCalories / selectedDays.length
+      : 0;
 
   const chartMaximum = Math.max(
     1,
-    ...selectedDays.map((day) =>
-      Math.max(
-        getCalories(day.calories_consumed),
-        getCalories(day.daily_calorie_goal)
-      )
-    )
+    ...selectedDays.flatMap((day) => [
+      getCalories(day.calories_consumed),
+      getCalories(day.daily_calorie_goal),
+    ])
   );
 
   const initials = selectedMember
@@ -166,14 +188,30 @@ export default function GroupWeeklyHistory({
         .toUpperCase()
     : "?";
 
+  const firstDate = selectedDays[0]?.log_date;
+  const lastDate = selectedDays[selectedDays.length - 1]?.log_date;
+
+  const dateRange =
+    firstDate && lastDate
+      ? `${getDateLabel(firstDate).date} – ${getDateLabel(lastDate).date}`
+      : "Last 7 days";
+
   return (
     <View style={styles.section}>
+      {/* Section heading */}
       <View style={styles.headingRow}>
         <View style={styles.headingText}>
-          <Text style={styles.eyebrow}>GROUP ACTIVITY</Text>
-          <Text style={styles.sectionTitle}>Weekly history</Text>
+          <View style={styles.eyebrowRow}>
+            <View style={styles.liveDot} />
+            <Text style={styles.eyebrow}>GROUP ACTIVITY</Text>
+          </View>
+
+          <Text style={styles.sectionTitle}>
+            Weekly history
+          </Text>
+
           <Text style={styles.subtitle}>
-            Last 7 days · Calories only
+            {dateRange} · Calories only
           </Text>
         </View>
 
@@ -188,39 +226,103 @@ export default function GroupWeeklyHistory({
           onPress={() => void loadHistory()}
           disabled={loading}
         >
-          <Text style={styles.refreshIcon}>↻</Text>
-          <Text style={styles.refreshText}>Refresh</Text>
+          {loading ? (
+            <ActivityIndicator
+              color={C.accent}
+              size="small"
+            />
+          ) : (
+            <Ionicons
+              name="refresh-outline"
+              size={19}
+              color={C.accent}
+            />
+          )}
         </Pressable>
       </View>
 
+      {/* Loading state */}
       {loading ? (
         <View style={styles.statusCard}>
-          <ActivityIndicator color={C.accent} size="large" />
-          <Text style={styles.muted}>Loading weekly history...</Text>
+          <ActivityIndicator
+            color={C.accent}
+            size="large"
+          />
+
+          <Text style={styles.statusTitle}>
+            Loading history
+          </Text>
+
+          <Text style={styles.muted}>
+            Fetching the latest weekly calorie data.
+          </Text>
         </View>
       ) : error ? (
+        /* Error state */
         <View style={styles.statusCard}>
-          <View style={styles.statusIcon}>
-            <Text style={styles.statusIconText}>!</Text>
+          <View style={styles.statusIconError}>
+            <Ionicons
+              name="alert-circle-outline"
+              size={25}
+              color={C.danger}
+            />
           </View>
+
+          <Text style={styles.statusTitle}>
+            Something went wrong
+          </Text>
+
           <Text style={styles.errorText}>{error}</Text>
+
           <Pressable
             style={styles.retryButton}
             onPress={() => void loadHistory()}
           >
-            <Text style={styles.retryText}>Try again</Text>
+            <Ionicons
+              name="refresh-outline"
+              size={16}
+              color={C.background}
+            />
+
+            <Text style={styles.retryText}>
+              Try again
+            </Text>
           </Pressable>
         </View>
       ) : !selectedMember ? (
+        /* Empty state */
         <View style={styles.statusCard}>
           <View style={styles.statusIcon}>
-            <Text style={styles.statusIconText}>↗</Text>
+            <Ionicons
+              name="bar-chart-outline"
+              size={27}
+              color={C.accent}
+            />
           </View>
-          <Text style={styles.emptyTitle}>No history yet</Text>
-          <Text style={styles.muted}>
-            Weekly calorie history will appear here when data is available
-            for this member.
+
+          <Text style={styles.statusTitle}>
+            No history yet
           </Text>
+
+          <Text style={styles.muted}>
+            Weekly calorie history will appear here when data
+            is available for this member.
+          </Text>
+
+          <Pressable
+            style={styles.retryButton}
+            onPress={() => void loadHistory()}
+          >
+            <Ionicons
+              name="refresh-outline"
+              size={16}
+              color={C.background}
+            />
+
+            <Text style={styles.retryText}>
+              Refresh
+            </Text>
+          </Pressable>
         </View>
       ) : (
         <>
@@ -228,7 +330,9 @@ export default function GroupWeeklyHistory({
           <View style={styles.summaryCard}>
             <View style={styles.memberRow}>
               <View style={styles.avatar}>
-                <Text style={styles.avatarText}>{initials}</Text>
+                <Text style={styles.avatarText}>
+                  {initials}
+                </Text>
               </View>
 
               <View style={styles.memberInfo}>
@@ -236,13 +340,22 @@ export default function GroupWeeklyHistory({
                   {selectedMember.display_name?.trim() ||
                     selectedMember.username}
                 </Text>
+
                 <Text style={styles.summaryUsername}>
                   @{selectedMember.username}
                 </Text>
               </View>
 
               <View style={styles.weekBadge}>
-                <Text style={styles.weekBadgeText}>7 DAYS</Text>
+                <Ionicons
+                  name="calendar-outline"
+                  size={12}
+                  color={C.accent}
+                />
+
+                <Text style={styles.weekBadgeText}>
+                  7 DAYS
+                </Text>
               </View>
             </View>
 
@@ -250,25 +363,33 @@ export default function GroupWeeklyHistory({
 
             <View style={styles.summaryStats}>
               <View style={styles.summaryStat}>
-                <Text style={styles.statLabel}>TOTAL CONSUMED</Text>
-                <View style={styles.statValueRow}>
-                  <Text style={styles.statValue}>
-                    {Math.round(totalCalories).toLocaleString()}
-                  </Text>
-                </View>
-                <Text style={styles.statUnit}>kcal this week</Text>
+                <Text style={styles.statLabel}>
+                  TOTAL CONSUMED
+                </Text>
+
+                <Text style={styles.statValue}>
+                  {formatCalories(totalCalories)}
+                </Text>
+
+                <Text style={styles.statUnit}>
+                  kcal this week
+                </Text>
               </View>
 
               <View style={styles.statDivider} />
 
               <View style={styles.summaryStat}>
-                <Text style={styles.statLabel}>DAILY AVERAGE</Text>
-                <View style={styles.statValueRow}>
-                  <Text style={styles.statValue}>
-                    {Math.round(averageCalories).toLocaleString()}
-                  </Text>
-                </View>
-                <Text style={styles.statUnit}>kcal per day</Text>
+                <Text style={styles.statLabel}>
+                  DAILY AVERAGE
+                </Text>
+
+                <Text style={styles.statValue}>
+                  {formatCalories(averageCalories)}
+                </Text>
+
+                <Text style={styles.statUnit}>
+                  kcal per recorded day
+                </Text>
               </View>
             </View>
           </View>
@@ -276,39 +397,58 @@ export default function GroupWeeklyHistory({
           {/* Weekly chart */}
           <View style={styles.chartCard}>
             <View style={styles.chartHeader}>
-              <View>
-                <Text style={styles.chartTitle}>Daily calories</Text>
+              <View style={styles.chartHeadingText}>
+                <Text style={styles.chartTitle}>
+                  Daily calories
+                </Text>
+
                 <Text style={styles.chartSubtitle}>
                   Intake compared with daily goal
                 </Text>
               </View>
+
               <View style={styles.chartIcon}>
-                <Text style={styles.chartIconText}>▥</Text>
+                <Ionicons
+                  name="stats-chart"
+                  size={19}
+                  color={C.accent}
+                />
               </View>
             </View>
 
+            {/* Chart legend */}
             <View style={styles.legendRow}>
               <View style={styles.legendItem}>
                 <View style={styles.legendBar} />
-                <Text style={styles.legendText}>Consumed</Text>
+                <Text style={styles.legendText}>
+                  Consumed
+                </Text>
               </View>
 
               <View style={styles.legendItem}>
                 <View style={styles.legendGoalLine} />
-                <Text style={styles.legendText}>Daily goal</Text>
+                <Text style={styles.legendText}>
+                  Daily goal
+                </Text>
               </View>
             </View>
 
+            {/* Bar chart */}
             <View style={styles.chart}>
               {selectedDays.map((day) => {
-                const calories = getCalories(day.calories_consumed);
+                const calories = getCalories(
+                  day.calories_consumed
+                );
+
                 const goal =
                   day.daily_calorie_goal == null
                     ? null
                     : getCalories(day.daily_calorie_goal);
 
                 const barHeight =
-                  calories > 0 ? (calories / chartMaximum) * 100 : 3;
+                  calories > 0
+                    ? (calories / chartMaximum) * 100
+                    : 3;
 
                 const goalBottom =
                   goal !== null && goal > 0
@@ -318,11 +458,15 @@ export default function GroupWeeklyHistory({
                 const labels = getDateLabel(day.log_date);
 
                 return (
-                  <View key={day.log_date} style={styles.barColumn}>
-                    <Text style={styles.barValue}>
-                      {calories >= 1000
-                        ? `${(calories / 1000).toFixed(1)}k`
-                        : Math.round(calories).toString()}
+                  <View
+                    key={day.log_date}
+                    style={styles.barColumn}
+                  >
+                    <Text
+                      style={styles.barValue}
+                      numberOfLines={1}
+                    >
+                      {formatCompactCalories(calories)}
                     </Text>
 
                     <View style={styles.barArea}>
@@ -330,7 +474,7 @@ export default function GroupWeeklyHistory({
                         <View
                           style={[
                             styles.goalLine,
-                            { bottom: goalBottom },
+                            { bottom: `${goalBottom}%` },
                           ]}
                         />
                       )}
@@ -338,7 +482,12 @@ export default function GroupWeeklyHistory({
                       <View
                         style={[
                           styles.bar,
-                          { height: Math.max(3, barHeight) },
+                          {
+                            height: `${Math.max(
+                              3,
+                              barHeight
+                            )}%`,
+                          },
                         ]}
                       />
                     </View>
@@ -346,32 +495,44 @@ export default function GroupWeeklyHistory({
                     <Text style={styles.weekdayLabel}>
                       {labels.weekday}
                     </Text>
-                    <Text style={styles.dateLabel}>{labels.date}</Text>
+
+                    <Text style={styles.dateLabel}>
+                      {labels.date}
+                    </Text>
                   </View>
                 );
               })}
             </View>
           </View>
 
-          {/* Daily details */}
+          {/* Daily breakdown */}
           <View style={styles.breakdownCard}>
             <View style={styles.breakdownHeader}>
               <View>
-                <Text style={styles.chartTitle}>Daily breakdown</Text>
+                <Text style={styles.chartTitle}>
+                  Daily breakdown
+                </Text>
+
                 <Text style={styles.chartSubtitle}>
-                  Your friend's daily progress
+                  Calorie intake and goal progress
                 </Text>
               </View>
-              <Text style={styles.breakdownCount}>
-                {selectedDays.length} DAYS
-              </Text>
+
+              <View style={styles.daysBadge}>
+                <Text style={styles.breakdownCount}>
+                  {selectedDays.length} DAYS
+                </Text>
+              </View>
             </View>
 
             {selectedDays
               .slice()
               .reverse()
               .map((day) => {
-                const calories = getCalories(day.calories_consumed);
+                const calories = getCalories(
+                  day.calories_consumed
+                );
+
                 const goal =
                   day.daily_calorie_goal == null
                     ? null
@@ -383,28 +544,41 @@ export default function GroupWeeklyHistory({
                     : null;
 
                 const labels = getDateLabel(day.log_date);
+
                 const metGoal =
                   percentage !== null && percentage >= 100;
 
+                const progressWidth = `${Math.min(
+                  Math.max(percentage ?? 0, 0),
+                  100
+                )}%` as `${number}%`;
+
                 return (
-                  <View key={day.log_date} style={styles.dayRow}>
+                  <View
+                    key={day.log_date}
+                    style={styles.dayRow}
+                  >
                     <View style={styles.dayHeader}>
                       <View style={styles.dayInfo}>
                         <Text style={styles.dayName}>
                           {labels.fullDate}
                         </Text>
+
                         <Text style={styles.dayGoal}>
                           {goal !== null && goal > 0
-                            ? `Goal: ${Math.round(goal).toLocaleString()} kcal`
-                            : "Goal not set"}
+                            ? `Goal: ${formatCalories(goal)} kcal`
+                            : "Daily goal not set"}
                         </Text>
                       </View>
 
                       <View style={styles.dayTotals}>
                         <Text style={styles.dayCalories}>
-                          {Math.round(calories).toLocaleString()}
+                          {formatCalories(calories)}
                         </Text>
-                        <Text style={styles.dayKcal}>kcal</Text>
+
+                        <Text style={styles.dayKcal}>
+                          kcal
+                        </Text>
                       </View>
                     </View>
 
@@ -415,7 +589,7 @@ export default function GroupWeeklyHistory({
                             style={[
                               styles.dayFill,
                               {
-                                width: `${Math.min(percentage ?? 0, 100)}%`,
+                                width: progressWidth,
                               },
                               metGoal && styles.dayFillMet,
                             ]}
@@ -426,14 +600,31 @@ export default function GroupWeeklyHistory({
                           <Text style={styles.dayPercentage}>
                             {percentage}% of goal
                           </Text>
-                          <Text
-                            style={[
-                              styles.goalStatus,
-                              metGoal && styles.goalStatusMet,
-                            ]}
-                          >
-                            {metGoal ? "Goal reached" : "In progress"}
-                          </Text>
+
+                          <View style={styles.goalStatusRow}>
+                            <Ionicons
+                              name={
+                                metGoal
+                                  ? "checkmark-circle"
+                                  : "time-outline"
+                              }
+                              size={13}
+                              color={
+                                metGoal ? C.accent : C.goal
+                              }
+                            />
+
+                            <Text
+                              style={[
+                                styles.goalStatus,
+                                metGoal && styles.goalStatusMet,
+                              ]}
+                            >
+                              {metGoal
+                                ? "Goal reached"
+                                : "In progress"}
+                            </Text>
+                          </View>
                         </View>
                       </>
                     )}
@@ -442,10 +633,17 @@ export default function GroupWeeklyHistory({
               })}
           </View>
 
+          {/* Privacy note */}
           <View style={styles.privacyNote}>
-            <Text style={styles.privacyIcon}>⌑</Text>
+            <Ionicons
+              name="lock-closed-outline"
+              size={15}
+              color={C.muted}
+            />
+
             <Text style={styles.privacyText}>
-              Weekly calorie totals only. Individual food logs remain private.
+              Weekly calorie totals only. Individual food logs
+              remain private.
             </Text>
           </View>
         </>
@@ -456,126 +654,158 @@ export default function GroupWeeklyHistory({
 
 const styles = StyleSheet.create({
   section: {
-    marginTop: 16,
+    marginTop: 12,
+    paddingBottom: 20,
   },
+
   headingRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 16,
+    marginBottom: 18,
     gap: 12,
   },
+
   headingText: {
     flex: 1,
   },
+
+  eyebrowRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+    marginBottom: 7,
+  },
+
+  liveDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+    backgroundColor: C.accent,
+  },
+
   eyebrow: {
     color: C.accent,
     fontSize: 9,
     fontWeight: "800",
-    letterSpacing: 1.7,
-    marginBottom: 6,
+    letterSpacing: 1.6,
   },
+
   sectionTitle: {
     color: C.text,
-    fontSize: 22,
+    fontSize: 23,
     fontWeight: "900",
-    letterSpacing: -0.5,
+    letterSpacing: -0.6,
   },
+
   subtitle: {
     color: C.secondary,
     fontSize: 12,
     marginTop: 5,
   },
+
   refreshButton: {
-    flexDirection: "row",
+    width: 42,
+    height: 42,
     alignItems: "center",
-    gap: 5,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 11,
+    justifyContent: "center",
+    borderRadius: 13,
     backgroundColor: C.card,
     borderWidth: 1,
     borderColor: C.border,
   },
-  refreshIcon: {
-    color: C.accent,
-    fontSize: 17,
-    fontWeight: "700",
-  },
-  refreshText: {
-    color: C.text,
-    fontSize: 11,
-    fontWeight: "700",
-  },
+
   pressed: {
-    opacity: 0.75,
+    opacity: 0.7,
   },
+
   disabled: {
     opacity: 0.5,
   },
+
   statusCard: {
-    padding: 24,
+    padding: 26,
     alignItems: "center",
     gap: 12,
     backgroundColor: C.card,
-    borderRadius: 18,
+    borderRadius: 19,
     borderWidth: 1,
     borderColor: C.border,
   },
+
+  statusIcon: {
+    width: 54,
+    height: 54,
+    borderRadius: 18,
+    backgroundColor: "#252D20",
+    borderWidth: 1,
+    borderColor: "#39482A",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  statusIconError: {
+    width: 54,
+    height: 54,
+    borderRadius: 18,
+    backgroundColor: "#301D1D",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+
+  statusTitle: {
+    color: C.text,
+    fontSize: 16,
+    fontWeight: "800",
+  },
+
   muted: {
     color: C.secondary,
     fontSize: 12,
     lineHeight: 19,
     textAlign: "center",
   },
+
   errorText: {
     color: C.danger,
     fontSize: 12,
     textAlign: "center",
     lineHeight: 19,
   },
-  statusIcon: {
-    width: 43,
-    height: 43,
-    borderRadius: 14,
-    backgroundColor: "#252C1E",
+
+  retryButton: {
+    flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-  },
-  statusIconText: {
-    color: C.accent,
-    fontSize: 22,
-    fontWeight: "800",
-  },
-  emptyTitle: {
-    color: C.text,
-    fontSize: 16,
-    fontWeight: "800",
-  },
-  retryButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 10,
+    gap: 7,
+    paddingHorizontal: 17,
+    paddingVertical: 11,
+    borderRadius: 11,
     backgroundColor: C.accent,
+    marginTop: 4,
   },
+
   retryText: {
     color: C.background,
     fontWeight: "900",
     fontSize: 12,
   },
 
+  // Member summary
   summaryCard: {
     padding: 17,
     backgroundColor: C.card,
     borderRadius: 19,
     borderWidth: 1,
     borderColor: C.border,
-    marginBottom: 12,
+    marginBottom: 13,
   },
+
   memberRow: {
     flexDirection: "row",
     alignItems: "center",
   },
+
   avatar: {
     width: 48,
     height: 48,
@@ -584,176 +814,203 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+
   avatarText: {
     color: C.background,
     fontSize: 20,
     fontWeight: "900",
   },
+
   memberInfo: {
     flex: 1,
     marginLeft: 12,
     marginRight: 8,
   },
+
   summaryName: {
     color: C.text,
     fontSize: 15,
     fontWeight: "800",
   },
+
   summaryUsername: {
     color: C.secondary,
     fontSize: 11,
     marginTop: 4,
   },
+
   weekBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
     paddingHorizontal: 9,
-    paddingVertical: 6,
-    borderRadius: 8,
-    backgroundColor: "#252C1E",
+    paddingVertical: 7,
+    borderRadius: 9,
+    backgroundColor: "#252D20",
     borderWidth: 1,
     borderColor: "#39482A",
   },
+
   weekBadgeText: {
     color: C.accent,
     fontSize: 9,
     fontWeight: "900",
-    letterSpacing: 0.8,
+    letterSpacing: 0.7,
   },
+
   divider: {
     height: 1,
     backgroundColor: C.border,
     marginVertical: 17,
   },
+
   summaryStats: {
     flexDirection: "row",
   },
+
   summaryStat: {
     flex: 1,
   },
+
   statLabel: {
     color: C.secondary,
     fontSize: 9,
     fontWeight: "800",
     letterSpacing: 0.8,
   },
-  statValueRow: {
-    flexDirection: "row",
-    alignItems: "baseline",
-    marginTop: 7,
-  },
+
   statValue: {
     color: C.text,
     fontSize: 24,
     fontWeight: "900",
     letterSpacing: -0.5,
+    marginTop: 8,
   },
+
   statUnit: {
     color: C.muted,
     fontSize: 10,
     marginTop: 4,
   },
+
   statDivider: {
     width: 1,
     backgroundColor: C.border,
     marginHorizontal: 15,
   },
 
+  // Chart
   chartCard: {
     backgroundColor: C.card,
     borderRadius: 19,
     borderWidth: 1,
     borderColor: C.border,
     padding: 16,
-    marginBottom: 12,
+    marginBottom: 13,
   },
+
   chartHeader: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
   },
+
+  chartHeadingText: {
+    flex: 1,
+  },
+
   chartTitle: {
     color: C.text,
     fontSize: 15,
     fontWeight: "800",
   },
+
   chartSubtitle: {
     color: C.secondary,
     fontSize: 11,
     marginTop: 5,
   },
+
   chartIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: 12,
-    backgroundColor: "#252C1E",
+    width: 39,
+    height: 39,
+    borderRadius: 13,
+    backgroundColor: "#252D20",
     borderWidth: 1,
     borderColor: "#39482A",
     alignItems: "center",
     justifyContent: "center",
   },
-  chartIconText: {
-    color: C.accent,
-    fontSize: 21,
-    fontWeight: "800",
-  },
+
   legendRow: {
     flexDirection: "row",
-    gap: 16,
-    marginTop: 18,
+    gap: 17,
+    marginTop: 19,
   },
+
   legendItem: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
+    gap: 7,
   },
+
   legendBar: {
     width: 9,
     height: 9,
     borderRadius: 3,
     backgroundColor: C.accent,
   },
+
   legendGoalLine: {
-    width: 13,
+    width: 14,
     height: 2,
     backgroundColor: C.goal,
   },
+
   legendText: {
     color: C.secondary,
     fontSize: 10,
   },
+
   chart: {
     flexDirection: "row",
     justifyContent: "space-between",
-    marginTop: 20,
-    gap: 3,
+    marginTop: 21,
+    gap: 4,
   },
+
   barColumn: {
     flex: 1,
     alignItems: "center",
     minWidth: 0,
   },
+
   barValue: {
     color: C.secondary,
     fontSize: 9,
     fontWeight: "700",
-    marginBottom: 6,
+    marginBottom: 7,
   },
+
   barArea: {
-    height: 106,
+    height: 108,
     width: "100%",
-    maxWidth: 30,
+    maxWidth: 31,
     justifyContent: "flex-end",
     alignItems: "center",
-    backgroundColor: C.input,
-    borderRadius: 6,
+    backgroundColor: "#141414",
+    borderRadius: 7,
     overflow: "hidden",
     position: "relative",
   },
+
   bar: {
     width: "70%",
     backgroundColor: C.accent,
-    borderTopLeftRadius: 4,
-    borderTopRightRadius: 4,
+    borderTopLeftRadius: 5,
+    borderTopRightRadius: 5,
   },
+
   goalLine: {
     position: "absolute",
     left: 0,
@@ -762,18 +1019,21 @@ const styles = StyleSheet.create({
     backgroundColor: C.goal,
     zIndex: 1,
   },
+
   weekdayLabel: {
     color: C.text,
     fontSize: 10,
     fontWeight: "700",
     marginTop: 9,
   },
+
   dateLabel: {
     color: C.muted,
     fontSize: 9,
     marginTop: 3,
   },
 
+  // Daily breakdown
   breakdownCard: {
     paddingHorizontal: 16,
     paddingTop: 17,
@@ -783,102 +1043,129 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: C.border,
   },
+
   breakdownHeader: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     marginBottom: 5,
   },
+
+  daysBadge: {
+    backgroundColor: "#252D20",
+    borderRadius: 8,
+    paddingHorizontal: 9,
+    paddingVertical: 6,
+  },
+
   breakdownCount: {
     color: C.accent,
     fontSize: 9,
     fontWeight: "900",
     letterSpacing: 0.7,
   },
+
   dayRow: {
     paddingVertical: 15,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: C.border,
   },
+
   dayHeader: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     gap: 10,
   },
+
   dayInfo: {
     flex: 1,
   },
+
   dayName: {
     color: C.text,
     fontSize: 12,
     fontWeight: "700",
   },
+
   dayGoal: {
     color: C.secondary,
     fontSize: 10,
     marginTop: 5,
   },
+
   dayTotals: {
     alignItems: "flex-end",
   },
+
   dayCalories: {
     color: C.text,
     fontSize: 16,
     fontWeight: "900",
   },
+
   dayKcal: {
     color: C.secondary,
     fontSize: 10,
     marginTop: 2,
   },
+
   dayTrack: {
-    height: 5,
-    borderRadius: 5,
-    backgroundColor: "#30352B",
+    height: 6,
+    borderRadius: 6,
+    backgroundColor: "#303030",
     overflow: "hidden",
     marginTop: 12,
   },
+
   dayFill: {
     height: "100%",
-    borderRadius: 5,
+    borderRadius: 6,
     backgroundColor: C.goal,
   },
+
   dayFillMet: {
     backgroundColor: C.accent,
   },
+
   percentageRow: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginTop: 7,
+    marginTop: 8,
   },
+
   dayPercentage: {
     color: C.secondary,
     fontSize: 10,
   },
+
+  goalStatusRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+  },
+
   goalStatus: {
     color: C.goal,
     fontSize: 10,
     fontWeight: "700",
   },
+
   goalStatusMet: {
     color: C.accent,
   },
 
+  // Privacy
   privacyNote: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 7,
-    marginTop: 15,
+    gap: 8,
+    marginTop: 17,
     paddingHorizontal: 8,
   },
-  privacyIcon: {
-    color: C.accent,
-    fontSize: 17,
-    fontWeight: "800",
-  },
+
   privacyText: {
     flex: 1,
     color: C.muted,
