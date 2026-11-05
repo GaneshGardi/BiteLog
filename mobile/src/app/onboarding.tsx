@@ -169,7 +169,7 @@ export default function OnboardingScreen() {
           </View>
 
           <Text style={styles.brandName}>
-            fun<Text style={styles.brandAccent}>tracker</Text>
+            Bite<Text style={styles.brandAccent}>Log</Text>
           </Text>
         </View>
 
