@@ -151,7 +151,7 @@ export default function SignupScreen() {
           </View>
 
           <Text style={styles.brandName}>
-            fun<Text style={styles.brandAccent}>tracker</Text>
+            Bite<Text style={styles.brandAccent}>Log</Text>
           </Text>
         </View>
 
