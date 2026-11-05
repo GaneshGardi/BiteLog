@@ -1,60 +1,62 @@
+
 import { Image } from 'expo-image';
 import * as SplashScreen from 'expo-splash-screen';
-import { useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { Dimensions, StyleSheet, View } from 'react-native';
 import Animated, { Easing, Keyframe } from 'react-native-reanimated';
-import { scheduleOnRN } from 'react-native-worklets';
+import { useVideoPlayer, VideoView } from 'expo-video';
+
+type AnimatedSplashOverlayProps = {
+  onFinish: () => void;
+};
 
 const INITIAL_SCALE_FACTOR = Dimensions.get('screen').height / 90;
 const DURATION = 600;
 
-export function AnimatedSplashOverlay() {
-  const [animate, setAnimate] = useState(false);
-  const [visible, setVisible] = useState(true);
+export function AnimatedSplashOverlay({
+  onFinish,
+}: AnimatedSplashOverlayProps) {
+  const hasStarted = useRef(false);
+  const hasFinished = useRef(false);
 
-  if (!visible) return null;
+  const player = useVideoPlayer(
+    require('@/assets/animations/bitelog-intro.mp4'),
+    (player) => {
+      player.loop = false;
+      player.muted = true;
+    }
+  );
 
-  const splashKeyframe = new Keyframe({
-    0: {
-      transform: [{ scale: 1 }],
-      opacity: 1,
-    },
-    20: {
-      opacity: 1,
-    },
-    70: {
-      opacity: 0,
-      easing: Easing.elastic(0.7),
-    },
-    100: {
-      opacity: 0,
-      transform: [{ scale: 1 }],
-      easing: Easing.elastic(0.7),
-    },
-  });
+  useEffect(() => {
+    const subscription = player.addListener('playToEnd', () => {
+      if (hasFinished.current) return;
 
-  const image = <Image style={styles.image} source={require('@/assets/images/expo-logo.png')} />;
+      hasFinished.current = true;
+      onFinish();
+    });
 
-  return animate ? (
-    <Animated.View
-      entering={splashKeyframe.duration(DURATION).withCallback((finished) => {
-        'worklet';
-        if (finished) {
-          scheduleOnRN(setVisible, false);
-        }
-      })}
-      style={styles.splashOverlay}>
-      {image}
-    </Animated.View>
-  ) : (
+    return () => subscription.remove();
+  }, [player, onFinish]);
+
+  return (
     <View
+      style={styles.splashOverlay}
       onLayout={() => {
+        if (hasStarted.current) return;
+
+        hasStarted.current = true;
+
         SplashScreen.hideAsync().finally(() => {
-          setAnimate(true);
+          player.play();
         });
       }}
-      style={styles.splashOverlay}>
-      {image}
+    >
+      <VideoView
+        player={player}
+        style={styles.video}
+        contentFit="contain"
+        nativeControls={false}
+      />
     </View>
   );
 }
@@ -98,13 +100,29 @@ const glowKeyframe = new Keyframe({
 export function AnimatedIcon() {
   return (
     <View style={styles.iconContainer}>
-      <Animated.View entering={glowKeyframe.duration(60 * 1000 * 4)} style={styles.glow}>
-        <Image style={styles.glow} source={require('@/assets/images/logo-glow.png')} />
+      <Animated.View
+        entering={glowKeyframe.duration(60 * 1000 * 4)}
+        style={styles.glow}
+      >
+        <Image
+          style={styles.glow}
+          source={require('@/assets/images/logo-glow.png')}
+        />
       </Animated.View>
 
-      <Animated.View entering={keyframe.duration(DURATION)} style={styles.background} />
-      <Animated.View style={styles.imageContainer} entering={logoKeyframe.duration(DURATION)}>
-        <Image style={styles.image} source={require('@/assets/images/expo-logo.png')} />
+      <Animated.View
+        entering={keyframe.duration(DURATION)}
+        style={styles.background}
+      />
+
+      <Animated.View
+        style={styles.imageContainer}
+        entering={logoKeyframe.duration(DURATION)}
+      >
+        <Image
+          style={styles.image}
+          source={require('@/assets/images/expo-logo.png')}
+        />
       </Animated.View>
     </View>
   );
@@ -140,9 +158,13 @@ const styles = StyleSheet.create({
   },
   splashOverlay: {
     ...StyleSheet.absoluteFill,
-    backgroundColor: '#208AEF',
+    backgroundColor: '#101010',
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 1000,
+  },
+  video: {
+    width: 280,
+    height: 280,
   },
 });
