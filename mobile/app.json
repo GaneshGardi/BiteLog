@@ -1,11 +1,11 @@
 {
   "expo": {
-    "name": "mobile",
+    "name": "BiteLog",
     "slug": "mobile",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "mobile",
+    "scheme": "bitelog",
     "userInterfaceStyle": "automatic",
     "ios": {
       "icon": "./assets/expo.icon"
@@ -17,7 +17,8 @@
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "package": "com.ganeshgardi.bitelog"
     },
     "web": {
       "output": "static",
@@ -28,7 +29,7 @@
       [
         "expo-splash-screen",
         {
-          "backgroundColor": "#208AEF",
+          "backgroundColor": "#101010",
           "image": "./assets/images/splash-icon.png",
           "imageWidth": 76
         }
@@ -40,6 +41,22 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {
+        "asyncRoutes": {
+          "web": true
+        }
+      },
+      "eas": {
+        "projectId": "cec016e0-2aec-45b7-87c3-3a2d8c7417d2"
+      }
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/cec016e0-2aec-45b7-87c3-3a2d8c7417d2"
     }
   }
 }
