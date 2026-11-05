@@ -1,4 +1,3 @@
-
 import { useState } from "react";
 import {
   ActivityIndicator,
@@ -14,6 +13,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
+import BiteLogMark from "../components/BiteLogoMark";
 
 import { supabase } from "../lib/supabase";
 
@@ -34,31 +34,22 @@ export default function SignupScreen() {
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [passwordVisible, setPasswordVisible] = useState(false);
-  const [confirmPasswordVisible, setConfirmPasswordVisible] =
-    useState(false);
+  const [confirmPasswordVisible, setConfirmPasswordVisible] = useState(false);
   const [loading, setLoading] = useState(false);
 
   const handleSignup = async () => {
     const cleanEmail = email.trim().toLowerCase();
     const cleanUsername = username.trim().toLowerCase();
 
-    if (
-      !cleanEmail ||
-      !cleanUsername ||
-      !password ||
-      !confirmPassword
-    ) {
-      Alert.alert(
-        "Missing information",
-        "Please fill in all fields."
-      );
+    if (!cleanEmail || !cleanUsername || !password || !confirmPassword) {
+      Alert.alert("Missing information", "Please fill in all fields.");
       return;
     }
 
     if (cleanUsername.length < 3) {
       Alert.alert(
         "Invalid username",
-        "Username must be at least 3 characters."
+        "Username must be at least 3 characters.",
       );
       return;
     }
@@ -66,7 +57,7 @@ export default function SignupScreen() {
     if (password.length < 6) {
       Alert.alert(
         "Invalid password",
-        "Password must be at least 6 characters."
+        "Password must be at least 6 characters.",
       );
       return;
     }
@@ -74,7 +65,7 @@ export default function SignupScreen() {
     if (password !== confirmPassword) {
       Alert.alert(
         "Passwords do not match",
-        "Please make sure both passwords are the same."
+        "Please make sure both passwords are the same.",
       );
       return;
     }
@@ -101,30 +92,20 @@ export default function SignupScreen() {
       console.log("SIGNUP USER:", data.user);
 
       if (!data.user) {
-        Alert.alert(
-          "Signup failed",
-          "The account could not be created."
-        );
+        Alert.alert("Signup failed", "The account could not be created.");
         return;
       }
 
-      Alert.alert(
-        "Account created",
-        `Welcome, ${cleanUsername}!`,
-        [
-          {
-            text: "Continue",
-            onPress: () => router.replace("/"),
-          },
-        ]
-      );
+      Alert.alert("Account created", `Welcome, ${cleanUsername}!`, [
+        {
+          text: "Continue",
+          onPress: () => router.replace("/"),
+        },
+      ]);
     } catch (error) {
       console.error("Signup error:", error);
 
-      Alert.alert(
-        "Something went wrong",
-        "Please try again."
-      );
+      Alert.alert("Something went wrong", "Please try again.");
     } finally {
       setLoading(false);
     }
@@ -143,11 +124,7 @@ export default function SignupScreen() {
         {/* Brand */}
         <View style={styles.brand}>
           <View style={styles.brandIcon}>
-            <Ionicons
-              name="nutrition"
-              size={25}
-              color={C.background}
-            />
+            <BiteLogMark width={52} height={52} />
           </View>
 
           <Text style={styles.brandName}>
@@ -157,17 +134,13 @@ export default function SignupScreen() {
 
         {/* Heading */}
         <View style={styles.header}>
-          <Text style={styles.eyebrow}>
-            YOUR JOURNEY STARTS HERE
-          </Text>
+          <Text style={styles.eyebrow}>YOUR JOURNEY STARTS HERE</Text>
 
-          <Text style={styles.title}>
-            Create your{"\n"}account.
-          </Text>
+          <Text style={styles.title}>Create your{"\n"}account.</Text>
 
           <Text style={styles.subtitle}>
-            Join funTracker and take control of your daily
-            nutrition, one meal at a time.
+            Join funTracker and take control of your daily nutrition, one meal
+            at a time.
           </Text>
         </View>
 
@@ -176,11 +149,7 @@ export default function SignupScreen() {
           <Text style={styles.label}>Email address</Text>
 
           <View style={styles.inputContainer}>
-            <Ionicons
-              name="mail-outline"
-              size={19}
-              color={C.muted}
-            />
+            <Ionicons name="mail-outline" size={19} color={C.muted} />
 
             <TextInput
               style={styles.input}
@@ -199,11 +168,7 @@ export default function SignupScreen() {
           <Text style={styles.label}>Username</Text>
 
           <View style={styles.inputContainer}>
-            <Ionicons
-              name="at-outline"
-              size={19}
-              color={C.muted}
-            />
+            <Ionicons name="at-outline" size={19} color={C.muted} />
 
             <TextInput
               style={styles.input}
@@ -218,11 +183,7 @@ export default function SignupScreen() {
           </View>
 
           <View style={styles.helperContainer}>
-            <Ionicons
-              name="people-outline"
-              size={14}
-              color={C.accent}
-            />
+            <Ionicons name="people-outline" size={14} color={C.accent} />
 
             <Text style={styles.helper}>
               This is the name your friends will see.
@@ -233,11 +194,7 @@ export default function SignupScreen() {
           <Text style={styles.label}>Password</Text>
 
           <View style={styles.inputContainer}>
-            <Ionicons
-              name="lock-closed-outline"
-              size={19}
-              color={C.muted}
-            />
+            <Ionicons name="lock-closed-outline" size={19} color={C.muted} />
 
             <TextInput
               style={styles.input}
@@ -252,32 +209,22 @@ export default function SignupScreen() {
             />
 
             <Pressable
-              onPress={() =>
-                setPasswordVisible(!passwordVisible)
-              }
+              onPress={() => setPasswordVisible(!passwordVisible)}
               disabled={loading}
               hitSlop={10}
             >
               <Ionicons
-                name={
-                  passwordVisible
-                    ? "eye-off-outline"
-                    : "eye-outline"
-                }
+                name={passwordVisible ? "eye-off-outline" : "eye-outline"}
                 size={20}
                 color={C.muted}
               />
             </Pressable>
           </View>
 
-          <Text style={styles.passwordHint}>
-            Use at least 6 characters.
-          </Text>
+          <Text style={styles.passwordHint}>Use at least 6 characters.</Text>
 
           {/* Confirm password */}
-          <Text style={styles.label}>
-            Confirm password
-          </Text>
+          <Text style={styles.label}>Confirm password</Text>
 
           <View style={styles.inputContainer}>
             <Ionicons
@@ -301,19 +248,13 @@ export default function SignupScreen() {
             />
 
             <Pressable
-              onPress={() =>
-                setConfirmPasswordVisible(
-                  !confirmPasswordVisible
-                )
-              }
+              onPress={() => setConfirmPasswordVisible(!confirmPasswordVisible)}
               disabled={loading}
               hitSlop={10}
             >
               <Ionicons
                 name={
-                  confirmPasswordVisible
-                    ? "eye-off-outline"
-                    : "eye-outline"
+                  confirmPasswordVisible ? "eye-off-outline" : "eye-outline"
                 }
                 size={20}
                 color={C.muted}
@@ -335,15 +276,9 @@ export default function SignupScreen() {
               <ActivityIndicator color={C.background} />
             ) : (
               <>
-                <Text style={styles.buttonText}>
-                  Create account
-                </Text>
+                <Text style={styles.buttonText}>Create account</Text>
 
-                <Ionicons
-                  name="arrow-forward"
-                  size={19}
-                  color={C.background}
-                />
+                <Ionicons name="arrow-forward" size={19} color={C.background} />
               </>
             )}
           </Pressable>
@@ -354,13 +289,9 @@ export default function SignupScreen() {
             onPress={() => router.back()}
             disabled={loading}
           >
-            <Text style={styles.loginText}>
-              Already have an account?{" "}
-            </Text>
+            <Text style={styles.loginText}>Already have an account? </Text>
 
-            <Text style={styles.loginLink}>
-              Log in
-            </Text>
+            <Text style={styles.loginLink}>Log in</Text>
           </Pressable>
 
           {/* Footer */}
@@ -407,7 +338,7 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 14,
-    backgroundColor: C.accent,
+    backgroundColor: "#000000",
     alignItems: "center",
     justifyContent: "center",
   },

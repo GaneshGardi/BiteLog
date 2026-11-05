@@ -14,6 +14,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
+import DateTimePicker from "@react-native-community/datetimepicker";
 
 import { supabase } from "../lib/supabase";
 
@@ -66,13 +67,42 @@ export default function OnboardingScreen() {
   const [weight, setWeight] = useState("");
   const [goal, setGoal] = useState("");
   const [loading, setLoading] = useState(false);
+  const [showDatePicker, setShowDatePicker] = useState(false);
 
+  // Format date for display
+  const formatDateForDisplay = (dateString: string) => {
+    if (!dateString) return "";
+
+    const [year, month, day] = dateString.split("-").map(Number);
+    const date = new Date(year, month - 1, day);
+
+    return date.toLocaleDateString("en-IN", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+    });
+  };
+
+  // Handle native date picker selection
+  const handleDateChange = (
+    event: { type: string },
+    selectedDate?: Date
+  ) => {
+    setShowDatePicker(false);
+
+    if (event.type === "set" && selectedDate) {
+      const year = selectedDate.getFullYear();
+      const month = String(selectedDate.getMonth() + 1).padStart(2, "0");
+      const day = String(selectedDate.getDate()).padStart(2, "0");
+
+      setBirthDate(`${year}-${month}-${day}`);
+    }
+  };
+
+  // Save onboarding details
   const handleContinue = async () => {
     if (!birthDate || !gender || !height || !weight || !goal) {
-      Alert.alert(
-        "Missing information",
-        "Please complete all fields."
-      );
+      Alert.alert("Missing information", "Please complete all fields.");
       return;
     }
 
@@ -80,18 +110,12 @@ export default function OnboardingScreen() {
     const weightKg = Number(weight);
 
     if (Number.isNaN(heightCm) || heightCm <= 0) {
-      Alert.alert(
-        "Invalid height",
-        "Please enter a valid height in cm."
-      );
+      Alert.alert("Invalid height", "Please enter a valid height in cm.");
       return;
     }
 
     if (Number.isNaN(weightKg) || weightKg <= 0) {
-      Alert.alert(
-        "Invalid weight",
-        "Please enter a valid weight in kg."
-      );
+      Alert.alert("Invalid weight", "Please enter a valid weight in kg.");
       return;
     }
 
@@ -104,11 +128,7 @@ export default function OnboardingScreen() {
       } = await supabase.auth.getUser();
 
       if (userError || !user) {
-        Alert.alert(
-          "Session expired",
-          "Please log in again."
-        );
-
+        Alert.alert("Session expired", "Please log in again.");
         router.replace("/login");
         return;
       }
@@ -126,23 +146,14 @@ export default function OnboardingScreen() {
 
       if (error) {
         console.error("Profile update error:", error);
-
-        Alert.alert(
-          "Could not save profile",
-          error.message
-        );
-
+        Alert.alert("Could not save profile", error.message);
         return;
       }
 
       router.replace("/calorie-goal");
     } catch (error) {
       console.error("Onboarding error:", error);
-
-      Alert.alert(
-        "Something went wrong",
-        "Please try again."
-      );
+      Alert.alert("Something went wrong", "Please try again.");
     } finally {
       setLoading(false);
     }
@@ -175,49 +186,74 @@ export default function OnboardingScreen() {
 
         {/* Heading */}
         <View style={styles.header}>
-          <Text style={styles.eyebrow}>
-            LET'S GET STARTED
-          </Text>
+          <Text style={styles.eyebrow}>LET'S GET STARTED</Text>
 
           <Text style={styles.title}>
             Build your{"\n"}personal profile.
           </Text>
 
           <Text style={styles.subtitle}>
-            A few details will help us personalize your
-            calorie goals and track your progress.
+            A few details will help us personalize your calorie goals and track
+            your progress.
           </Text>
         </View>
 
         <View style={styles.form}>
           {/* Date of birth */}
-          <Text style={styles.label}>
-            Date of birth
-          </Text>
+          <Text style={styles.label}>Date of birth</Text>
 
-          <View style={styles.inputContainer}>
+          <Pressable
+            style={styles.inputContainer}
+            onPress={() => setShowDatePicker(true)}
+            disabled={loading}
+          >
             <Ionicons
               name="calendar-outline"
               size={19}
               color={C.muted}
             />
 
-            <TextInput
-              style={styles.input}
-              placeholder="YYYY-MM-DD"
-              placeholderTextColor={C.muted}
-              value={birthDate}
-              onChangeText={setBirthDate}
-              autoCapitalize="none"
-              autoCorrect={false}
-              editable={!loading}
+            <Text
+              style={[
+                styles.input,
+                !birthDate && { color: C.muted },
+              ]}
+            >
+              {birthDate
+                ? formatDateForDisplay(birthDate)
+                : "Select your date of birth"}
+            </Text>
+
+            <Ionicons
+              name="chevron-down"
+              size={18}
+              color={C.muted}
             />
-          </View>
+          </Pressable>
+
+          {showDatePicker && (
+            <DateTimePicker
+              value={
+                birthDate
+                  ? (() => {
+                      const [year, month, day] = birthDate
+                        .split("-")
+                        .map(Number);
+
+                      return new Date(year, month - 1, day);
+                    })()
+                  : new Date(2000, 0, 1)
+              }
+              mode="date"
+              display={Platform.OS === "ios" ? "compact" : "default"}
+              maximumDate={new Date()}
+              minimumDate={new Date(1900, 0, 1)}
+              onChange={handleDateChange}
+            />
+          )}
 
           {/* Gender */}
-          <Text style={styles.label}>
-            Gender
-          </Text>
+          <Text style={styles.label}>Gender</Text>
 
           <View style={styles.genderGrid}>
             {genders.map((item) => {
@@ -255,9 +291,7 @@ export default function OnboardingScreen() {
           </View>
 
           {/* Height */}
-          <Text style={styles.label}>
-            Height
-          </Text>
+          <Text style={styles.label}>Height</Text>
 
           <View style={styles.inputContainer}>
             <Ionicons
@@ -282,9 +316,7 @@ export default function OnboardingScreen() {
           </View>
 
           {/* Weight */}
-          <Text style={styles.label}>
-            Weight
-          </Text>
+          <Text style={styles.label}>Weight</Text>
 
           <View style={styles.inputContainer}>
             <Ionicons
@@ -309,9 +341,7 @@ export default function OnboardingScreen() {
           </View>
 
           {/* Goal */}
-          <Text style={styles.label}>
-            What is your goal?
-          </Text>
+          <Text style={styles.label}>What is your goal?</Text>
 
           <View style={styles.goalContainer}>
             {goals.map((item) => {
@@ -383,9 +413,7 @@ export default function OnboardingScreen() {
               <ActivityIndicator color={C.background} />
             ) : (
               <>
-                <Text style={styles.buttonText}>
-                  Continue
-                </Text>
+                <Text style={styles.buttonText}>Continue</Text>
 
                 <Ionicons
                   name="arrow-forward"
@@ -396,6 +424,7 @@ export default function OnboardingScreen() {
             )}
           </Pressable>
 
+          {/* Privacy Footer */}
           <View style={styles.footer}>
             <Ionicons
               name="shield-checkmark-outline"
@@ -513,6 +542,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: C.text,
     paddingVertical: 0,
+    textAlignVertical: "center",
   },
 
   unitBadge: {

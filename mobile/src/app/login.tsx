@@ -1,4 +1,3 @@
-
 import { useState } from "react";
 import {
   ActivityIndicator,
@@ -16,6 +15,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 
 import { supabase } from "../lib/supabase";
+import BiteLogMark from "../components/BiteLogoMark"
 
 const C = {
   background: "#101010",
@@ -40,7 +40,7 @@ export default function LoginScreen() {
     if (!cleanEmail || !password) {
       Alert.alert(
         "Missing information",
-        "Please enter your email and password."
+        "Please enter your email and password.",
       );
       return;
     }
@@ -48,11 +48,10 @@ export default function LoginScreen() {
     setLoading(true);
 
     try {
-      const { data, error } =
-        await supabase.auth.signInWithPassword({
-          email: cleanEmail,
-          password,
-        });
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: cleanEmail,
+        password,
+      });
 
       if (error) {
         Alert.alert("Login failed", error.message);
@@ -65,29 +64,25 @@ export default function LoginScreen() {
       if (!data.session) {
         Alert.alert(
           "Login failed",
-          "Login succeeded but no session was created."
+          "Login succeeded but no session was created.",
         );
         return;
       }
 
-      const { data: existingGoal, error: goalError } =
-        await supabase
-          .from("calorie_goals")
-          .select("daily_calories")
-          .eq("user_id", data.user.id)
-          .order("effective_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
+      const { data: existingGoal, error: goalError } = await supabase
+        .from("calorie_goals")
+        .select("daily_calories")
+        .eq("user_id", data.user.id)
+        .order("effective_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
 
       if (goalError) {
-        console.error(
-          "Failed to check existing calorie goal:",
-          goalError
-        );
+        console.error("Failed to check existing calorie goal:", goalError);
 
         Alert.alert(
           "Could not load calorie goal",
-          "Please try logging in again."
+          "Please try logging in again.",
         );
         return;
       }
@@ -100,10 +95,7 @@ export default function LoginScreen() {
     } catch (error) {
       console.error("Login error:", error);
 
-      Alert.alert(
-        "Something went wrong",
-        "Please try again."
-      );
+      Alert.alert("Something went wrong", "Please try again.");
     } finally {
       setLoading(false);
     }
@@ -122,11 +114,7 @@ export default function LoginScreen() {
         {/* Brand */}
         <View style={styles.brand}>
           <View style={styles.brandIcon}>
-            <Ionicons
-              name="nutrition"
-              size={27}
-              color={C.background}
-            />
+            <BiteLogMark width={52} height={52} />
           </View>
 
           <Text style={styles.brandName}>
@@ -138,9 +126,7 @@ export default function LoginScreen() {
         <View style={styles.header}>
           <Text style={styles.eyebrow}>WELCOME BACK</Text>
 
-          <Text style={styles.title}>
-            Good to see{"\n"}you again.
-          </Text>
+          <Text style={styles.title}>Good to see{"\n"}you again.</Text>
 
           <Text style={styles.subtitle}>
             Log in to continue tracking your progress.
@@ -152,11 +138,7 @@ export default function LoginScreen() {
           <Text style={styles.label}>Email address</Text>
 
           <View style={styles.inputContainer}>
-            <Ionicons
-              name="mail-outline"
-              size={19}
-              color={C.muted}
-            />
+            <Ionicons name="mail-outline" size={19} color={C.muted} />
 
             <TextInput
               style={styles.input}
@@ -175,11 +157,7 @@ export default function LoginScreen() {
           <Text style={styles.label}>Password</Text>
 
           <View style={styles.inputContainer}>
-            <Ionicons
-              name="lock-closed-outline"
-              size={19}
-              color={C.muted}
-            />
+            <Ionicons name="lock-closed-outline" size={19} color={C.muted} />
 
             <TextInput
               style={styles.input}
@@ -196,18 +174,12 @@ export default function LoginScreen() {
             />
 
             <Pressable
-              onPress={() =>
-                setPasswordVisible((visible) => !visible)
-              }
+              onPress={() => setPasswordVisible((visible) => !visible)}
               disabled={loading}
               hitSlop={10}
             >
               <Ionicons
-                name={
-                  passwordVisible
-                    ? "eye-off-outline"
-                    : "eye-outline"
-                }
+                name={passwordVisible ? "eye-off-outline" : "eye-outline"}
                 size={19}
                 color={C.muted}
               />
@@ -228,44 +200,30 @@ export default function LoginScreen() {
               <ActivityIndicator color={C.background} />
             ) : (
               <>
-                <Text style={styles.buttonText}>
-                  Log in
-                </Text>
+                <Text style={styles.buttonText}>Log in</Text>
 
-                <Ionicons
-                  name="arrow-forward"
-                  size={19}
-                  color={C.background}
-                />
+                <Ionicons name="arrow-forward" size={19} color={C.background} />
               </>
             )}
           </Pressable>
 
           {/* Signup */}
           <View style={styles.signupContainer}>
-            <Text style={styles.signupPrompt}>
-              Don't have an account?
-            </Text>
+            <Text style={styles.signupPrompt}>Don't have an account?</Text>
 
             <Pressable
               onPress={() => router.push("/signup")}
               disabled={loading}
               hitSlop={8}
             >
-              <Text style={styles.signupLink}>
-                Create one
-              </Text>
+              <Text style={styles.signupLink}>Create one</Text>
             </Pressable>
           </View>
         </View>
 
         {/* Footer */}
         <View style={styles.footer}>
-          <Ionicons
-            name="shield-checkmark-outline"
-            size={14}
-            color={C.muted}
-          />
+          <Ionicons name="shield-checkmark-outline" size={14} color={C.muted} />
 
           <Text style={styles.footerText}>
             Your progress. Your journey. Your data.
@@ -292,27 +250,28 @@ const styles = StyleSheet.create({
 
   // Brand
   brand: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 11,
-    marginBottom: 58,
-  },
+  flexDirection: "row",
+  alignItems: "center",
+  gap: 12,
+  marginBottom: 58,
+},
 
   brandIcon: {
-    width: 43,
-    height: 43,
+    width: 35,
+    height: 35,
     borderRadius: 14,
-    backgroundColor: C.accent,
+    backgroundColor: "#000000",
     alignItems: "center",
     justifyContent: "center",
   },
 
-  brandName: {
-    color: C.text,
-    fontSize: 21,
-    fontWeight: "900",
-    letterSpacing: -0.8,
-  },
+  
+brandName: {
+  color: C.text,
+  fontSize: 24,
+  fontWeight: "900",
+  letterSpacing: -0.8,
+},
 
   brandAccent: {
     color: C.accent,
