@@ -1,12 +1,15 @@
 
+import '../lib/sentry';
+
 import { useEffect, useState } from 'react';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { View } from 'react-native';
+import { Sentry } from '../lib/sentry';
 
 import { supabase } from '../lib/supabase';
 import { AnimatedSplashOverlay } from '../components/animated-icon';
 
-export default function RootLayout() {
+function RootLayout() {
   const router = useRouter();
   const segments = useSegments();
 
@@ -82,3 +85,5 @@ export default function RootLayout() {
     </View>
   );
 }
+
+export default Sentry.wrap(RootLayout);

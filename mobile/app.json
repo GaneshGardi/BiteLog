@@ -37,7 +37,15 @@
       "@react-native-community/datetimepicker",
       "expo-image",
       "expo-sqlite",
-      "expo-video"
+      "expo-video",
+      [
+        "@sentry/react-native/expo",
+        {
+          "url": "https://sentry.io/",
+          "project": "bitelog",
+          "organization": "ganesh-7"
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,
