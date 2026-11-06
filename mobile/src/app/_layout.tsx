@@ -1,10 +1,9 @@
 
-import '../lib/sentry';
+import { Sentry } from '../lib/sentry';
 
 import { useEffect, useState } from 'react';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { View } from 'react-native';
-import { Sentry } from '../lib/sentry';
 
 import { supabase } from '../lib/supabase';
 import { AnimatedSplashOverlay } from '../components/animated-icon';
@@ -24,6 +23,10 @@ function RootLayout() {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
       if (mounted) {
+        Sentry.setUser(
+          session?.user ? { id: session.user.id } : null
+        );
+
         setIsAuthenticated(!!session);
         setSessionLoading(false);
       }
@@ -35,6 +38,10 @@ function RootLayout() {
       if (error) {
         console.error('Failed to restore auth session:', error);
       }
+
+      Sentry.setUser(
+        session?.user ? { id: session.user.id } : null
+      );
 
       setIsAuthenticated(!!session);
       setSessionLoading(false);
