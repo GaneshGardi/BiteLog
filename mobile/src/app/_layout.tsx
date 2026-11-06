@@ -19,6 +19,7 @@ function RootLayout() {
   useEffect(() => {
     let mounted = true;
 
+     Sentry.logger.info('BiteLog app started');
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
