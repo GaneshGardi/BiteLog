@@ -8,7 +8,8 @@
     "scheme": "bitelog",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon"
+      "icon": "./assets/expo.icon",
+      "infoPlist": {}
     },
     "android": {
       "adaptiveIcon": {
@@ -45,7 +46,9 @@
           "project": "bitelog",
           "organization": "ganesh-7"
         }
-      ]
+      ],
+      "expo-localization",
+      "@sentry/react-native"
     ],
     "experiments": {
       "typedRoutes": true,

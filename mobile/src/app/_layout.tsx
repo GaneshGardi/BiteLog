@@ -1,16 +1,27 @@
 
 import { Sentry } from '../lib/sentry';
 
-import { useEffect, useState } from 'react';
-import { Stack, useRouter, useSegments } from 'expo-router';
+import { useEffect, useRef, useState } from 'react';
+import {
+  Stack,
+  useRouter,
+  useSegments,
+} from 'expo-router';
 import { View } from 'react-native';
+import {
+  PostHogProvider,
+  usePostHog,
+} from 'posthog-react-native';
 
 import { supabase } from '../lib/supabase';
 import { AnimatedSplashOverlay } from '../components/animated-icon';
 
-function RootLayout() {
+function RootLayoutContent() {
   const router = useRouter();
   const segments = useSegments();
+  const posthog = usePostHog();
+
+  const identifiedUserId = useRef<string | null>(null);
 
   const [sessionLoading, setSessionLoading] = useState(true);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -19,25 +30,27 @@ function RootLayout() {
   useEffect(() => {
     let mounted = true;
 
-     Sentry.logger.info('BiteLog app started');
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (mounted) {
-        Sentry.setUser(
-          session?.user ? { id: session.user.id } : null
-        );
+    Sentry.logger.info('BiteLog app started');
 
-        setIsAuthenticated(!!session);
-        setSessionLoading(false);
-      }
-    });
+    // Record one app-open event per app launch.
+    posthog.capture('app_opened');
 
-    supabase.auth.getSession().then(({ data: { session }, error }) => {
+    function syncSession(session: any) {
       if (!mounted) return;
 
-      if (error) {
-        console.error('Failed to restore auth session:', error);
+      const userId = session?.user?.id ?? null;
+
+      // Avoid identifying the same user multiple times.
+      if (userId !== identifiedUserId.current) {
+        if (userId) {
+          // Use only the pseudonymous Supabase UUID.
+          posthog.identify(userId);
+        } else if (identifiedUserId.current) {
+          // Reset analytics identity after logout.
+          posthog.reset();
+        }
+
+        identifiedUserId.current = userId;
       }
 
       Sentry.setUser(
@@ -46,13 +59,27 @@ function RootLayout() {
 
       setIsAuthenticated(!!session);
       setSessionLoading(false);
+    }
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      syncSession(session);
+    });
+
+    supabase.auth.getSession().then(({ data: { session }, error }) => {
+      if (error) {
+        console.error('Failed to restore auth session:', error);
+      }
+
+      syncSession(session);
     });
 
     return () => {
       mounted = false;
       subscription.unsubscribe();
     };
-  }, []);
+  }, [posthog]);
 
   useEffect(() => {
     if (sessionLoading) return;
@@ -91,6 +118,24 @@ function RootLayout() {
         />
       )}
     </View>
+  );
+}
+
+function RootLayout() {
+  return (
+    <PostHogProvider
+      projectToken={process.env.EXPO_PUBLIC_POSTHOG_API_KEY ?? ''}
+      options={{
+        host:
+          process.env.EXPO_PUBLIC_POSTHOG_HOST ??
+          'https://eu.i.posthog.com',
+        captureAppLifecycleEvents: false,
+        enableSessionReplay: false,
+      }}
+      autocapture={false}
+    >
+      <RootLayoutContent />
+    </PostHogProvider>
   );
 }
 
