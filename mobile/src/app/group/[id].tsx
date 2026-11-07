@@ -1,4 +1,3 @@
-
 import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
@@ -23,6 +22,8 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { supabase } from "../../lib/supabase";
+import { usePostHog } from "posthog-react-native";
+import { Sentry } from "../../lib/sentry";
 
 type GroupInfo = {
   id: string;
@@ -60,6 +61,7 @@ type DailyProgress = {
 export default function GroupDetailsScreen() {
   const { id } = useLocalSearchParams<{ id: string | string[] }>();
   const router = useRouter();
+  const posthog = usePostHog();
 
   const groupId = Array.isArray(id) ? id[0] : id;
 
@@ -132,13 +134,11 @@ export default function GroupDetailsScreen() {
         console.error("Error loading group calorie progress:", error);
         setDailyProgress([]);
         setProgressError(
-          "Could not load calorie progress. Pull down to retry."
+          "Could not load calorie progress. Pull down to retry.",
         );
       }
 
-      const userIds = [
-        ...new Set(memberList.map((member) => member.user_id)),
-      ];
+      const userIds = [...new Set(memberList.map((member) => member.user_id))];
 
       if (userIds.length > 0) {
         const { data: profileData, error: profileError } = await supabase
@@ -163,7 +163,7 @@ export default function GroupDetailsScreen() {
 
       Alert.alert(
         "Unable to load group",
-        error instanceof Error ? error.message : "Please try again."
+        error instanceof Error ? error.message : "Please try again.",
       );
     } finally {
       setLoading(false);
@@ -173,9 +173,10 @@ export default function GroupDetailsScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      posthog.capture("group_viewed");
       setLoading(true);
       void loadGroup();
-    }, [loadGroup])
+    }, [loadGroup, posthog]),
   );
 
   const refresh = () => {
@@ -201,12 +202,9 @@ export default function GroupDetailsScreen() {
 
     const timeout = setTimeout(async () => {
       try {
-        const { data, error } = await supabase.rpc(
-          "search_users_for_invites",
-          {
-            p_search: searchTerm,
-          }
-        );
+        const { data, error } = await supabase.rpc("search_users_for_invites", {
+          p_search: searchTerm,
+        });
 
         if (error) throw error;
 
@@ -217,7 +215,7 @@ export default function GroupDetailsScreen() {
         if (!cancelled) {
           console.error("Username search failed:", error);
           setSearchError(
-            "Search is temporarily unavailable. You can still enter a username directly."
+            "Search is temporarily unavailable. You can still enter a username directly.",
           );
         }
       } finally {
@@ -248,16 +246,13 @@ export default function GroupDetailsScreen() {
     if (!targetUsername) {
       Alert.alert(
         "Username required",
-        "Enter the username of the person you want to invite."
+        "Enter the username of the person you want to invite.",
       );
       return;
     }
 
     if (!groupId) {
-      Alert.alert(
-        "Group unavailable",
-        "Reopen the group and try again."
-      );
+      Alert.alert("Group unavailable", "Reopen the group and try again.");
       return;
     }
 
@@ -271,6 +266,12 @@ export default function GroupDetailsScreen() {
 
       if (error) throw error;
 
+      Sentry.logger.info("Group invitation sent", {
+        operation: "send_group_invitation",
+      });
+
+      posthog.capture("group_invitation_sent");
+
       setInviteVisible(false);
       setUsername("");
       setSearchResults([]);
@@ -278,9 +279,19 @@ export default function GroupDetailsScreen() {
 
       Alert.alert(
         "Invitation sent!",
-        `Your invitation to @${targetUsername} has been sent.`
+        `Your invitation to @${targetUsername} has been sent.`,
       );
     } catch (error) {
+      Sentry.logger.error("Group invitation failed", {
+        operation: "send_group_invitation",
+      });
+
+      Sentry.captureException(error);
+
+      posthog.capture("group_invitation_failed", {
+        failure_stage: "send_invitation",
+      });
+
       console.error("Error sending invitation:", error);
 
       const message =
@@ -325,11 +336,7 @@ export default function GroupDetailsScreen() {
       ) : !group ? (
         <View style={styles.center}>
           <View style={styles.emptyIcon}>
-            <Ionicons
-              name="people-outline"
-              size={30}
-              color="#B6F36B"
-            />
+            <Ionicons name="people-outline" size={30} color="#B6F36B" />
           </View>
 
           <Text style={styles.heading}>Group not found</Text>
@@ -338,10 +345,7 @@ export default function GroupDetailsScreen() {
             You may not have access to this group.
           </Text>
 
-          <Pressable
-            style={styles.primaryButton}
-            onPress={() => router.back()}
-          >
+          <Pressable style={styles.primaryButton} onPress={() => router.back()}>
             <Text style={styles.primaryButtonText}>Go back</Text>
           </Pressable>
         </View>
@@ -362,24 +366,15 @@ export default function GroupDetailsScreen() {
           {/* Group overview */}
           <View style={styles.hero}>
             <View style={styles.groupIcon}>
-              <Ionicons
-                name="people"
-                size={32}
-                color="#B6F36B"
-              />
+              <Ionicons name="people" size={32} color="#B6F36B" />
             </View>
 
             <Text style={styles.groupName}>{group.name}</Text>
 
             <View style={styles.memberCountBadge}>
-              <Ionicons
-                name="people-outline"
-                size={14}
-                color="#B6F36B"
-              />
+              <Ionicons name="people-outline" size={14} color="#B6F36B" />
               <Text style={styles.memberCountText}>
-                {members.length}{" "}
-                {members.length === 1 ? "member" : "members"}
+                {members.length} {members.length === 1 ? "member" : "members"}
               </Text>
             </View>
 
@@ -404,25 +399,15 @@ export default function GroupDetailsScreen() {
 
           {!!progressError && (
             <View style={styles.errorBanner}>
-              <Ionicons
-                name="alert-circle-outline"
-                size={18}
-                color="#FF8A8A"
-              />
-              <Text style={styles.errorBannerText}>
-                {progressError}
-              </Text>
+              <Ionicons name="alert-circle-outline" size={18} color="#FF8A8A" />
+              <Text style={styles.errorBannerText}>{progressError}</Text>
             </View>
           )}
 
           {/* Member cards */}
           {members.length === 0 ? (
             <View style={styles.emptyCard}>
-              <Ionicons
-                name="person-add-outline"
-                size={30}
-                color="#777777"
-              />
+              <Ionicons name="person-add-outline" size={30} color="#777777" />
               <Text style={styles.emptyTitle}>No members yet</Text>
               <Text style={styles.emptyDescription}>
                 Invite friends to start tracking progress together.
@@ -433,7 +418,7 @@ export default function GroupDetailsScreen() {
               const profile = profiles[member.user_id];
 
               const progress = dailyProgress.find(
-                (item) => item.user_id === member.user_id
+                (item) => item.user_id === member.user_id,
               );
 
               const memberUsername =
@@ -445,8 +430,7 @@ export default function GroupDetailsScreen() {
                 memberUsername ||
                 "Member";
 
-              const consumed =
-                Number(progress?.calories_consumed) || 0;
+              const consumed = Number(progress?.calories_consumed) || 0;
 
               const goal =
                 progress?.daily_calorie_goal == null
@@ -460,7 +444,7 @@ export default function GroupDetailsScreen() {
 
               const progressWidth = `${Math.min(
                 Math.max(percentage ?? 0, 0),
-                100
+                100,
               )}%` as `${number}%`;
 
               return (
@@ -471,9 +455,7 @@ export default function GroupDetailsScreen() {
                     pressed && styles.memberCardPressed,
                   ]}
                   accessibilityRole="button"
-                  accessibilityLabel={
-                    `View weekly history for ${displayName}`
-                  }
+                  accessibilityLabel={`View weekly history for ${displayName}`}
                   onPress={() => openMemberHistory(member.user_id)}
                 >
                   <View style={styles.memberTopRow}>
@@ -484,9 +466,7 @@ export default function GroupDetailsScreen() {
                     </View>
 
                     <View style={styles.memberInfo}>
-                      <Text style={styles.memberName}>
-                        {displayName}
-                      </Text>
+                      <Text style={styles.memberName}>{displayName}</Text>
 
                       <Text style={styles.usernameLabel}>
                         {memberUsername
@@ -508,11 +488,7 @@ export default function GroupDetailsScreen() {
                             : "person-outline"
                         }
                         size={11}
-                        color={
-                          member.role === "owner"
-                            ? "#B6F36B"
-                            : "#999999"
-                        }
+                        color={member.role === "owner" ? "#B6F36B" : "#999999"}
                       />
                       <Text
                         style={[
@@ -575,9 +551,7 @@ export default function GroupDetailsScreen() {
                   </View>
 
                   <View style={styles.historyHintRow}>
-                    <Text style={styles.historyHint}>
-                      View weekly history
-                    </Text>
+                    <Text style={styles.historyHint}>View weekly history</Text>
                     <Ionicons
                       name="chevron-forward"
                       size={16}
@@ -597,25 +571,15 @@ export default function GroupDetailsScreen() {
             ]}
             onPress={() => setInviteVisible(true)}
           >
-            <Ionicons
-              name="person-add-outline"
-              size={19}
-              color="#101010"
-            />
-            <Text style={styles.inviteButtonText}>
-              Invite friends
-            </Text>
+            <Ionicons name="person-add-outline" size={19} color="#101010" />
+            <Text style={styles.inviteButtonText}>Invite friends</Text>
           </Pressable>
 
           <View style={styles.privacyNote}>
-            <Ionicons
-              name="lock-closed-outline"
-              size={15}
-              color="#777777"
-            />
+            <Ionicons name="lock-closed-outline" size={15} color="#777777" />
             <Text style={styles.footer}>
-              Only daily calorie progress is shared. Individual food
-              logs remain private.
+              Only daily calorie progress is shared. Individual food logs remain
+              private.
             </Text>
           </View>
         </ScrollView>
@@ -633,25 +597,15 @@ export default function GroupDetailsScreen() {
           style={styles.modalOverlay}
           behavior={Platform.OS === "ios" ? "padding" : undefined}
         >
-          <Pressable
-            style={styles.modalBackdrop}
-            onPress={closeInviteModal}
-          />
+          <Pressable style={styles.modalBackdrop} onPress={closeInviteModal} />
 
-          <SafeAreaView
-            style={styles.modalSafeArea}
-            edges={["bottom"]}
-          >
+          <SafeAreaView style={styles.modalSafeArea} edges={["bottom"]}>
             <View style={styles.modalContent}>
               <View style={styles.modalHandle} />
 
               <View style={styles.modalHeader}>
                 <View style={styles.modalIcon}>
-                  <Ionicons
-                    name="person-add"
-                    size={23}
-                    color="#B6F36B"
-                  />
+                  <Ionicons name="person-add" size={23} color="#B6F36B" />
                 </View>
 
                 <Pressable
@@ -659,31 +613,21 @@ export default function GroupDetailsScreen() {
                   onPress={closeInviteModal}
                   disabled={sending}
                 >
-                  <Ionicons
-                    name="close"
-                    size={21}
-                    color="#AAAAAA"
-                  />
+                  <Ionicons name="close" size={21} color="#AAAAAA" />
                 </Pressable>
               </View>
 
-              <Text style={styles.modalTitle}>
-                Invite a friend
-              </Text>
+              <Text style={styles.modalTitle}>Invite a friend</Text>
 
               <Text style={styles.modalDescription}>
-                Find people by username or display name and invite
-                them to your group.
+                Find people by username or display name and invite them to your
+                group.
               </Text>
 
               <Text style={styles.inputLabel}>USERNAME</Text>
 
               <View style={styles.inputContainer}>
-                <Ionicons
-                  name="search-outline"
-                  size={19}
-                  color="#777777"
-                />
+                <Ionicons name="search-outline" size={19} color="#777777" />
 
                 <TextInput
                   style={styles.input}
@@ -700,17 +644,12 @@ export default function GroupDetailsScreen() {
                 />
 
                 {searching && (
-                  <ActivityIndicator
-                    size="small"
-                    color="#B6F36B"
-                  />
+                  <ActivityIndicator size="small" color="#B6F36B" />
                 )}
               </View>
 
               {!!searchError && (
-                <Text style={styles.errorText}>
-                  {searchError}
-                </Text>
+                <Text style={styles.errorText}>{searchError}</Text>
               )}
 
               {username.trim().length >= 2 &&
@@ -724,9 +663,7 @@ export default function GroupDetailsScreen() {
 
               {searchResults.length > 0 && (
                 <View style={styles.resultsContainer}>
-                  <Text style={styles.resultsTitle}>
-                    MATCHING USERS
-                  </Text>
+                  <Text style={styles.resultsTitle}>MATCHING USERS</Text>
 
                   {searchResults.map((user) => {
                     const displayName =
@@ -746,17 +683,13 @@ export default function GroupDetailsScreen() {
                         </View>
 
                         <View style={styles.resultInfo}>
-                          <Text style={styles.resultName}>
-                            {displayName}
-                          </Text>
+                          <Text style={styles.resultName}>{displayName}</Text>
                           <Text style={styles.usernameLabel}>
                             @{user.username}
                           </Text>
                         </View>
 
-                        <Text style={styles.selectLabel}>
-                          Select
-                        </Text>
+                        <Text style={styles.selectLabel}>Select</Text>
                       </Pressable>
                     );
                   })}
@@ -764,10 +697,7 @@ export default function GroupDetailsScreen() {
               )}
 
               <Pressable
-                style={[
-                  styles.sendButton,
-                  sending && styles.disabledButton,
-                ]}
+                style={[styles.sendButton, sending && styles.disabledButton]}
                 onPress={() => void sendInvitation()}
                 disabled={sending}
               >
@@ -775,14 +705,8 @@ export default function GroupDetailsScreen() {
                   <ActivityIndicator color="#101010" />
                 ) : (
                   <>
-                    <Ionicons
-                      name="send-outline"
-                      size={17}
-                      color="#101010"
-                    />
-                    <Text style={styles.sendButtonText}>
-                      Send invitation
-                    </Text>
+                    <Ionicons name="send-outline" size={17} color="#101010" />
+                    <Text style={styles.sendButtonText}>Send invitation</Text>
                   </>
                 )}
               </Pressable>

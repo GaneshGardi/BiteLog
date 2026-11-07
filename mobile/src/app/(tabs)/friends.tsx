@@ -1,4 +1,3 @@
-
 import { useCallback, useState } from "react";
 import {
   ActivityIndicator,
@@ -16,6 +15,8 @@ import {
 } from "react-native";
 import { useFocusEffect, useRouter } from "expo-router";
 import { supabase } from "../../lib/supabase";
+import { usePostHog } from "posthog-react-native";
+import { Sentry } from "../../lib/sentry";
 
 type Group = {
   id: string;
@@ -57,69 +58,74 @@ export default function FriendsScreen() {
   const [creating, setCreating] = useState(false);
 
   const router = useRouter();
+  const posthog = usePostHog();
 
-  const loadData = useCallback(async (showLoader = true) => {
-    if (showLoader) setLoading(true);
+  const loadData = useCallback(
+    async (showLoader = true) => {
+      if (showLoader) setLoading(true);
 
-    try {
-      const {
-        data: { user },
-        error: authError,
-      } = await supabase.auth.getUser();
+      try {
+        const {
+          data: { user },
+          error: authError,
+        } = await supabase.auth.getUser();
 
-      if (authError) throw authError;
+        if (authError) throw authError;
 
-      if (!user) {
-        setGroups([]);
-        setInvitations([]);
-        router.replace("/login");
-        return;
+        if (!user) {
+          setGroups([]);
+          setInvitations([]);
+          router.replace("/login");
+          return;
+        }
+
+        const [membershipResult, invitationResult] = await Promise.all([
+          supabase
+            .from("group_members")
+            .select("group_id")
+            .eq("user_id", user.id),
+          supabase.rpc("get_pending_group_invitations"),
+        ]);
+
+        if (membershipResult.error) throw membershipResult.error;
+        if (invitationResult.error) throw invitationResult.error;
+
+        const groupIds = (membershipResult.data ?? []).map(
+          (membership) => membership.group_id,
+        );
+
+        const groupsResult =
+          groupIds.length > 0
+            ? await supabase
+                .from("groups")
+                .select("id, name, created_by, created_at")
+                .in("id", groupIds)
+                .order("created_at", { ascending: false })
+            : { data: [], error: null };
+
+        if (groupsResult.error) throw groupsResult.error;
+
+        setGroups(groupsResult.data ?? []);
+        setInvitations(invitationResult.data ?? []);
+      } catch (error) {
+        console.error("Error loading Friends screen:", error);
+        Alert.alert(
+          "Could not load Friends",
+          error instanceof Error ? error.message : "Please try again.",
+        );
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
       }
-
-      const [membershipResult, invitationResult] = await Promise.all([
-        supabase
-          .from("group_members")
-          .select("group_id")
-          .eq("user_id", user.id),
-        supabase.rpc("get_pending_group_invitations"),
-      ]);
-
-      if (membershipResult.error) throw membershipResult.error;
-      if (invitationResult.error) throw invitationResult.error;
-
-      const groupIds = (membershipResult.data ?? []).map(
-        (membership) => membership.group_id
-      );
-
-      const groupsResult =
-        groupIds.length > 0
-          ? await supabase
-              .from("groups")
-              .select("id, name, created_by, created_at")
-              .in("id", groupIds)
-              .order("created_at", { ascending: false })
-          : { data: [], error: null };
-
-      if (groupsResult.error) throw groupsResult.error;
-
-      setGroups(groupsResult.data ?? []);
-      setInvitations(invitationResult.data ?? []);
-    } catch (error) {
-      console.error("Error loading Friends screen:", error);
-      Alert.alert(
-        "Could not load Friends",
-        error instanceof Error ? error.message : "Please try again."
-      );
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  }, [router]);
+    },
+    [router],
+  );
 
   useFocusEffect(
     useCallback(() => {
+      posthog.capture("friends_viewed");
       void loadData();
-    }, [loadData])
+    }, [loadData, posthog]),
   );
 
   const handleCreateGroup = async () => {
@@ -145,16 +151,33 @@ export default function FriendsScreen() {
       if (error) throw error;
       if (!data) throw new Error("No group ID was returned.");
 
+      Sentry.logger.info("Group created", {
+        operation: "create_group",
+      });
+
+      posthog.capture("group_created");
+
       setGroupName("");
       setModalVisible(false);
       await loadData();
 
       Alert.alert("Group created!", `${name} is ready.`);
     } catch (error) {
+      Sentry.logger.error("Group creation failed", {
+        operation: "create_group",
+      });
+
+      Sentry.captureException(error);
+
+      posthog.capture("group_creation_failed", {
+        failure_stage: "create_group",
+      });
+
       console.error("Error creating group:", error);
+
       Alert.alert(
         "Could not create group",
-        error instanceof Error ? error.message : "Please try again."
+        error instanceof Error ? error.message : "Please try again.",
       );
     } finally {
       setCreating(false);
@@ -163,7 +186,7 @@ export default function FriendsScreen() {
 
   const handleInvitationResponse = async (
     invitation: Invitation,
-    response: "accepted" | "declined"
+    response: "accepted" | "declined",
   ) => {
     setRespondingTo(invitation.invitation_id);
 
@@ -178,16 +201,18 @@ export default function FriendsScreen() {
       await loadData(false);
 
       Alert.alert(
-        response === "accepted" ? "Invitation accepted!" : "Invitation declined",
+        response === "accepted"
+          ? "Invitation accepted!"
+          : "Invitation declined",
         response === "accepted"
           ? `You have joined ${invitation.group_name}.`
-          : `You declined the invitation to ${invitation.group_name}.`
+          : `You declined the invitation to ${invitation.group_name}.`,
       );
     } catch (error) {
       console.error("Error responding to invitation:", error);
       Alert.alert(
         "Could not update invitation",
-        error instanceof Error ? error.message : "Please try again."
+        error instanceof Error ? error.message : "Please try again.",
       );
     } finally {
       setRespondingTo(null);
@@ -200,8 +225,7 @@ export default function FriendsScreen() {
   };
 
   const renderInvitation = ({ item }: { item: Invitation }) => {
-    const inviter =
-      item.inviter_display_name?.trim() || item.inviter_username;
+    const inviter = item.inviter_display_name?.trim() || item.inviter_username;
     const isResponding = respondingTo === item.invitation_id;
 
     return (
@@ -224,7 +248,10 @@ export default function FriendsScreen() {
 
         <View style={styles.actionsRow}>
           <Pressable
-            style={[styles.acceptButton, respondingTo !== null && styles.disabled]}
+            style={[
+              styles.acceptButton,
+              respondingTo !== null && styles.disabled,
+            ]}
             onPress={() => void handleInvitationResponse(item, "accepted")}
             disabled={respondingTo !== null}
             accessibilityRole="button"
@@ -238,7 +265,10 @@ export default function FriendsScreen() {
           </Pressable>
 
           <Pressable
-            style={[styles.declineButton, respondingTo !== null && styles.disabled]}
+            style={[
+              styles.declineButton,
+              respondingTo !== null && styles.disabled,
+            ]}
             onPress={() => void handleInvitationResponse(item, "declined")}
             disabled={respondingTo !== null}
             accessibilityRole="button"
@@ -253,10 +283,7 @@ export default function FriendsScreen() {
 
   const renderGroup = ({ item }: { item: Group }) => (
     <Pressable
-      style={({ pressed }) => [
-        styles.groupCard,
-        pressed && styles.cardPressed,
-      ]}
+      style={({ pressed }) => [styles.groupCard, pressed && styles.cardPressed]}
       onPress={() =>
         router.push({
           pathname: "/group/[id]",
@@ -338,9 +365,7 @@ export default function FriendsScreen() {
                 <View style={styles.noInvitations}>
                   <Text style={styles.noInvitationsIcon}>✉</Text>
                   <View style={styles.flex}>
-                    <Text style={styles.noInvitationsTitle}>
-                      All caught up
-                    </Text>
+                    <Text style={styles.noInvitationsTitle}>All caught up</Text>
                     <Text style={styles.noInvitationsText}>
                       New group invitations will show up here.
                     </Text>
@@ -371,14 +396,16 @@ export default function FriendsScreen() {
               </View>
               <Text style={styles.emptyTitle}>Your circle starts here</Text>
               <Text style={styles.emptyDescription}>
-                Create a group and invite friends to keep each other
-                accountable on your fitness journey.
+                Create a group and invite friends to keep each other accountable
+                on your fitness journey.
               </Text>
               <Pressable
                 style={styles.emptyButton}
                 onPress={() => setModalVisible(true)}
               >
-                <Text style={styles.emptyButtonText}>Create your first group</Text>
+                <Text style={styles.emptyButtonText}>
+                  Create your first group
+                </Text>
               </Pressable>
             </View>
           }
@@ -410,8 +437,8 @@ export default function FriendsScreen() {
             <Text style={styles.modalEyebrow}>BUILD YOUR CIRCLE</Text>
             <Text style={styles.modalTitle}>Create a group</Text>
             <Text style={styles.modalDescription}>
-              Give your group a name. You’ll be its owner and can invite
-              friends next.
+              Give your group a name. You’ll be its owner and can invite friends
+              next.
             </Text>
 
             <Text style={styles.inputLabel}>GROUP NAME</Text>

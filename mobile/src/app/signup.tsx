@@ -16,6 +16,8 @@ import { router } from "expo-router";
 import BiteLogMark from "../components/BiteLogoMark";
 
 import { supabase } from "../lib/supabase";
+import { usePostHog } from "posthog-react-native";
+import { Sentry } from "../lib/sentry";
 
 const C = {
   background: "#101010",
@@ -29,6 +31,8 @@ const C = {
 };
 
 export default function SignupScreen() {
+  const posthog = usePostHog();
+
   const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -84,17 +88,44 @@ export default function SignupScreen() {
       });
 
       if (error) {
+        Sentry.logger.error("Signup failed", {
+          operation: "signup",
+          method: "email",
+        });
+
+        Sentry.captureException(error);
+
+        posthog.capture("signup_failed", {
+          method: "email",
+          failure_stage: "supabase_signup",
+        });
+
         Alert.alert("Signup failed", error.message);
         return;
       }
 
-      console.log("SIGNUP SESSION:", data.session);
-      console.log("SIGNUP USER:", data.user);
-
       if (!data.user) {
+        Sentry.logger.warn("Signup returned no user", {
+          operation: "signup",
+        });
+
+        posthog.capture("signup_failed", {
+          method: "email",
+          failure_stage: "missing_user",
+        });
+
         Alert.alert("Signup failed", "The account could not be created.");
         return;
       }
+
+      Sentry.logger.info("Signup completed", {
+        operation: "signup",
+        method: "email",
+      });
+
+      posthog.capture("signup_completed", {
+        method: "email",
+      });
 
       Alert.alert("Account created", `Welcome, ${cleanUsername}!`, [
         {
@@ -103,7 +134,17 @@ export default function SignupScreen() {
         },
       ]);
     } catch (error) {
-      console.error("Signup error:", error);
+      Sentry.logger.error("Unexpected signup error", {
+        operation: "signup",
+        method: "email",
+      });
+
+      Sentry.captureException(error);
+
+      posthog.capture("signup_failed", {
+        method: "email",
+        failure_stage: "unexpected_error",
+      });
 
       Alert.alert("Something went wrong", "Please try again.");
     } finally {

@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -11,7 +11,7 @@ import {
   Text,
   TextInput,
   View,
-} from 'react-native';
+} from "react-native";
 import {
   ArrowLeft,
   Camera,
@@ -28,10 +28,12 @@ import {
   X,
   Beef,
   Droplets,
-} from 'lucide-react-native';
-import * as ImagePicker from 'expo-image-picker';
-import { router } from 'expo-router';
-import { supabase } from '../lib/supabase';
+} from "lucide-react-native";
+import * as ImagePicker from "expo-image-picker";
+import { router } from "expo-router";
+import { supabase } from "../lib/supabase";
+import { usePostHog } from "posthog-react-native";
+import { Sentry } from "../lib/sentry";
 
 type MealItem = {
   name: string;
@@ -60,29 +62,31 @@ type NewFoodForm = {
 };
 
 const emptyFood: NewFoodForm = {
-  name: '',
-  quantity_g: '100',
-  calories: '',
-  protein: '0',
-  carbs: '0',
-  fat: '0',
-  fiber: '0',
+  name: "",
+  quantity_g: "100",
+  calories: "",
+  protein: "0",
+  carbs: "0",
+  fat: "0",
+  fiber: "0",
 };
 
 const localDate = () => {
   const now = new Date();
   const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const day = String(now.getDate()).padStart(2, '0');
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
 };
 
 const numberValue = (value: string) => Number(value.trim());
 
 export default function ScanMealScreen() {
+  const posthog = usePostHog();
+
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [imageBase64, setImageBase64] = useState<string | null>(null);
-  const [mimeType, setMimeType] = useState('image/jpeg');
+  const [mimeType, setMimeType] = useState("image/jpeg");
   const [meal, setMeal] = useState<MealResult | null>(null);
 
   const [analyzing, setAnalyzing] = useState(false);
@@ -113,23 +117,23 @@ export default function ScanMealScreen() {
 
       if (!permission.granted) {
         Alert.alert(
-          'Permission needed',
+          "Permission needed",
           useCamera
-            ? 'Allow camera access to take a photo of your meal.'
-            : 'Allow photo library access to select a meal image.',
+            ? "Allow camera access to take a photo of your meal."
+            : "Allow photo library access to select a meal image.",
         );
         return;
       }
 
       const result = useCamera
         ? await ImagePicker.launchCameraAsync({
-            mediaTypes: ['images'],
+            mediaTypes: ["images"],
             allowsEditing: true,
             quality: 0.8,
             base64: true,
           })
         : await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: ['images'],
+            mediaTypes: ["images"],
             allowsEditing: true,
             quality: 0.8,
             base64: true,
@@ -141,37 +145,37 @@ export default function ScanMealScreen() {
 
       if (!asset.base64) {
         Alert.alert(
-          'Could not read image',
-          'Please select another photo and try again.',
+          "Could not read image",
+          "Please select another photo and try again.",
         );
         return;
       }
 
       setImageUri(asset.uri);
       setImageBase64(asset.base64);
-      setMimeType(asset.mimeType || 'image/jpeg');
+      setMimeType(asset.mimeType || "image/jpeg");
       setMeal(null);
       setShowAddForm(false);
       setNewFood({ ...emptyFood });
     } catch (error) {
-      console.error('Image picker error:', error);
-      Alert.alert('Unable to open images', 'Please try again.');
+      console.error("Image picker error:", error);
+      Alert.alert("Unable to open images", "Please try again.");
     }
   };
 
   const analyzeMeal = async () => {
     if (!imageBase64) {
       Alert.alert(
-        'Select a photo',
-        'Take a photo or choose one from your gallery first.',
+        "Select a photo",
+        "Take a photo or choose one from your gallery first.",
       );
       return;
     }
 
     setAnalyzing(true);
-
+    posthog.capture("meal_scan_started");
     try {
-      const { data, error } = await supabase.functions.invoke('analyze-meal', {
+      const { data, error } = await supabase.functions.invoke("analyze-meal", {
         body: {
           image_base64: imageBase64,
           mime_type: mimeType,
@@ -182,15 +186,15 @@ export default function ScanMealScreen() {
 
       if (!data?.success || !data?.meal || !Array.isArray(data.meal.items)) {
         throw new Error(
-          data?.error || 'The AI response was not in the expected format.',
+          data?.error || "The AI response was not in the expected format.",
         );
       }
 
       const normalizedMeal: MealResult = {
-        meal_name: String(data.meal.meal_name || 'Scanned meal'),
-        notes: data.meal.notes ? String(data.meal.notes) : '',
+        meal_name: String(data.meal.meal_name || "Scanned meal"),
+        notes: data.meal.notes ? String(data.meal.notes) : "",
         items: data.meal.items.map((item: Partial<MealItem>) => ({
-          name: String(item.name || ''),
+          name: String(item.name || ""),
           quantity_g: Number(item.quantity_g) || 0,
           calories: Number(item.calories) || 0,
           protein: Number(item.protein) || 0,
@@ -201,47 +205,56 @@ export default function ScanMealScreen() {
       };
 
       setMeal(normalizedMeal);
+      Sentry.logger.info("Meal analysis completed", {
+        operation: "meal_analysis",
+      });
+
+      posthog.capture("meal_scan_completed");
       setShowAddForm(false);
 
       if (normalizedMeal.items.length === 0) {
         Alert.alert(
-          'No food detected',
-          'Try a clearer photo with the food visible from above.',
+          "No food detected",
+          "Try a clearer photo with the food visible from above.",
         );
       }
     } catch (error) {
-      console.error('Meal analysis error:', error);
+      console.error("Meal analysis error:", error);
+
+      Sentry.logger.error("Meal analysis failed", {
+        operation: "meal_analysis",
+      });
+
+      Sentry.captureException(error);
+
+      posthog.capture("meal_scan_failed");
 
       const message =
         error instanceof Error
           ? error.message
-          : 'Something went wrong while analyzing your meal.';
+          : "Something went wrong while analyzing your meal.";
 
-      Alert.alert('Could not analyze meal', message);
+      Alert.alert("Could not analyze meal", message);
     } finally {
       setAnalyzing(false);
     }
   };
 
-  const updateItem = (
-    index: number,
-    field: keyof MealItem,
-    value: string,
-  ) => {
+  const updateItem = (index: number, field: keyof MealItem, value: string) => {
     setMeal((current) => {
       if (!current) return current;
 
       const items = [...current.items];
       const existing = { ...items[index] };
 
-      if (field === 'name') {
+      if (field === "name") {
         existing.name = value;
       } else {
-        const parsed = value.trim() === '' ? 0 : Number(value);
+        const parsed = value.trim() === "" ? 0 : Number(value);
 
         if (!Number.isFinite(parsed) || parsed < 0) return current;
 
-        const numericField = field as Exclude<keyof MealItem, 'name'>;
+        const numericField = field as Exclude<keyof MealItem, "name">;
         existing[numericField] = parsed;
       }
 
@@ -268,7 +281,7 @@ export default function ScanMealScreen() {
 
   const renderNutritionInput = (
     label: string,
-    field: Exclude<keyof NewFoodForm, 'name' | 'quantity_g'>,
+    field: Exclude<keyof NewFoodForm, "name" | "quantity_g">,
     placeholder: string,
   ) => (
     <View style={styles.nutritionInput} key={field}>
@@ -294,7 +307,7 @@ export default function ScanMealScreen() {
     const fiber = numberValue(newFood.fiber);
 
     if (!name) {
-      Alert.alert('Food name required', 'Enter a name for this food item.');
+      Alert.alert("Food name required", "Enter a name for this food item.");
       return;
     }
 
@@ -305,8 +318,8 @@ export default function ScanMealScreen() {
       quantity <= 0
     ) {
       Alert.alert(
-        'Check nutrition values',
-        'Enter a portion greater than zero and valid non-negative nutrition values.',
+        "Check nutrition values",
+        "Enter a portion greater than zero and valid non-negative nutrition values.",
       );
       return;
     }
@@ -337,7 +350,10 @@ export default function ScanMealScreen() {
 
   const saveMeal = async () => {
     if (!meal || meal.items.length === 0) {
-      Alert.alert('Nothing to save', 'Add at least one food item to your meal.');
+      Alert.alert(
+        "Nothing to save",
+        "Add at least one food item to your meal.",
+      );
       return;
     }
 
@@ -353,16 +369,17 @@ export default function ScanMealScreen() {
 
     if (invalidItem) {
       Alert.alert(
-        'Check your food items',
-        'Every item needs a name, a portion greater than zero, and valid nutrition values.',
+        "Check your food items",
+        "Every item needs a name, a portion greater than zero, and valid nutrition values.",
       );
       return;
     }
 
     setSaving(true);
+    posthog.capture("ai_meal_save_started");
 
     try {
-      const { data, error } = await supabase.functions.invoke('save-ai-meal', {
+      const { data, error } = await supabase.functions.invoke("save-ai-meal", {
         body: {
           log_date: localDate(),
           items: meal.items.map((item) => ({
@@ -380,28 +397,44 @@ export default function ScanMealScreen() {
       if (error) throw error;
 
       if (!data?.success) {
-        throw new Error(data?.error || 'The meal could not be saved.');
+        throw new Error(data?.error || "The meal could not be saved.");
       }
+      Sentry.logger.info("AI meal saved successfully", {
+        operation: "save_ai_meal",
+      });
 
+      posthog.capture("food_log_created", {
+        source: "ai_scan",
+      });
+      posthog.capture("ai_meal_save_completed");
+      
       Alert.alert(
-        'Meal saved',
-        'Your scanned meal has been added to today’s food log.',
+        "Meal saved",
+        "Your scanned meal has been added to today’s food log.",
         [
           {
-            text: 'Done',
+            text: "Done",
             onPress: () => router.back(),
           },
         ],
       );
     } catch (error) {
-      console.error('Save meal error:', error);
+      console.error("Save meal error:", error);
+
+      Sentry.logger.error("AI meal save failed", {
+        operation: "save_ai_meal",
+      });
+
+      Sentry.captureException(error);
+
+      posthog.capture("ai_meal_save_failed");
 
       const message =
         error instanceof Error
           ? error.message
-          : 'Something went wrong while saving your meal.';
+          : "Something went wrong while saving your meal.";
 
-      Alert.alert('Could not save meal', message);
+      Alert.alert("Could not save meal", message);
     } finally {
       setSaving(false);
     }
@@ -410,7 +443,7 @@ export default function ScanMealScreen() {
   return (
     <KeyboardAvoidingView
       style={styles.screen}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
       <ScrollView
         contentContainerStyle={styles.container}
@@ -494,9 +527,7 @@ export default function ScanMealScreen() {
                 <Camera size={30} color={C.accent} />
               </View>
 
-              <Text style={styles.placeholderTitle}>
-                Your meal starts here
-              </Text>
+              <Text style={styles.placeholderTitle}>Your meal starts here</Text>
 
               <Text style={styles.placeholderText}>
                 Take a picture or upload one from your gallery.
@@ -584,14 +615,12 @@ export default function ScanMealScreen() {
                 <View style={styles.summaryInfo}>
                   <Text style={styles.eyebrow}>DETECTED MEAL</Text>
                   <Text style={styles.mealName}>
-                    {meal.meal_name || 'Detected food'}
+                    {meal.meal_name || "Detected food"}
                   </Text>
                 </View>
               </View>
 
-              {!!meal.notes && (
-                <Text style={styles.note}>{meal.notes}</Text>
-              )}
+              {!!meal.notes && <Text style={styles.note}>{meal.notes}</Text>}
 
               <Text style={styles.helperText}>
                 AI estimates can be inaccurate, especially for hidden
@@ -604,7 +633,7 @@ export default function ScanMealScreen() {
                 <View style={styles.foodCardHeader}>
                   <View style={styles.itemNumberBadge}>
                     <Text style={styles.foodNumber}>
-                      {String(index + 1).padStart(2, '0')}
+                      {String(index + 1).padStart(2, "0")}
                     </Text>
                   </View>
 
@@ -626,7 +655,7 @@ export default function ScanMealScreen() {
                 <TextInput
                   style={styles.input}
                   value={item.name}
-                  onChangeText={(value) => updateItem(index, 'name', value)}
+                  onChangeText={(value) => updateItem(index, "name", value)}
                   placeholder="Food name"
                   placeholderTextColor={C.muted}
                 />
@@ -638,7 +667,7 @@ export default function ScanMealScreen() {
                     style={styles.quantityInput}
                     value={String(item.quantity_g)}
                     onChangeText={(value) =>
-                      updateItem(index, 'quantity_g', value)
+                      updateItem(index, "quantity_g", value)
                     }
                     keyboardType="decimal-pad"
                     placeholder="Quantity"
@@ -653,11 +682,11 @@ export default function ScanMealScreen() {
                 <View style={styles.nutritionGrid}>
                   {(
                     [
-                      ['Calories (kcal)', 'calories'],
-                      ['Protein (g)', 'protein'],
-                      ['Carbs (g)', 'carbs'],
-                      ['Fat (g)', 'fat'],
-                      ['Fiber (g)', 'fiber'],
+                      ["Calories (kcal)", "calories"],
+                      ["Protein (g)", "protein"],
+                      ["Carbs (g)", "carbs"],
+                      ["Fat (g)", "fat"],
+                      ["Fiber (g)", "fiber"],
                     ] as const
                   ).map(([label, field]) => (
                     <View style={styles.nutritionInput} key={field}>
@@ -693,7 +722,7 @@ export default function ScanMealScreen() {
 
               <View style={styles.addFoodTextContainer}>
                 <Text style={styles.addFoodTitle}>
-                  {showAddForm ? 'Cancel adding food' : 'Missing something?'}
+                  {showAddForm ? "Cancel adding food" : "Missing something?"}
                 </Text>
 
                 <Text style={styles.addFoodSubtitle}>
@@ -705,9 +734,7 @@ export default function ScanMealScreen() {
                 size={18}
                 color={C.accent}
                 style={
-                  showAddForm
-                    ? { transform: [{ rotate: '90deg' }] }
-                    : undefined
+                  showAddForm ? { transform: [{ rotate: "90deg" }] } : undefined
                 }
               />
             </Pressable>
@@ -724,7 +751,7 @@ export default function ScanMealScreen() {
                 <TextInput
                   style={styles.input}
                   value={newFood.name}
-                  onChangeText={(value) => updateNewFood('name', value)}
+                  onChangeText={(value) => updateNewFood("name", value)}
                   placeholder="e.g. Chapati"
                   placeholderTextColor={C.muted}
                 />
@@ -733,26 +760,21 @@ export default function ScanMealScreen() {
                 <TextInput
                   style={styles.input}
                   value={newFood.quantity_g}
-                  onChangeText={(value) =>
-                    updateNewFood('quantity_g', value)
-                  }
+                  onChangeText={(value) => updateNewFood("quantity_g", value)}
                   keyboardType="decimal-pad"
                   placeholder="100"
                   placeholderTextColor={C.muted}
                 />
 
                 <View style={styles.nutritionGrid}>
-                  {renderNutritionInput('Calories (kcal) *', 'calories', '0')}
-                  {renderNutritionInput('Protein (g) *', 'protein', '0')}
-                  {renderNutritionInput('Carbs (g) *', 'carbs', '0')}
-                  {renderNutritionInput('Fat (g) *', 'fat', '0')}
-                  {renderNutritionInput('Fiber (g) *', 'fiber', '0')}
+                  {renderNutritionInput("Calories (kcal) *", "calories", "0")}
+                  {renderNutritionInput("Protein (g) *", "protein", "0")}
+                  {renderNutritionInput("Carbs (g) *", "carbs", "0")}
+                  {renderNutritionInput("Fat (g) *", "fat", "0")}
+                  {renderNutritionInput("Fiber (g) *", "fiber", "0")}
                 </View>
 
-                <Pressable
-                  style={styles.primaryButton}
-                  onPress={addFoodItem}
-                >
+                <Pressable style={styles.primaryButton} onPress={addFoodItem}>
                   <Plus size={18} color={C.bg} />
                   <Text style={styles.primaryButtonText}>Add to meal</Text>
                 </Pressable>
@@ -874,14 +896,14 @@ export default function ScanMealScreen() {
 }
 
 const C = {
-  bg: '#101010',
-  card: '#1A1A1A',
-  cardAlt: '#222222',
-  accent: '#B6F36B',
-  text: '#F5F5F5',
-  muted: '#969696',
-  border: '#303030',
-  danger: '#FF7777',
+  bg: "#101010",
+  card: "#1A1A1A",
+  cardAlt: "#222222",
+  accent: "#B6F36B",
+  text: "#F5F5F5",
+  muted: "#969696",
+  border: "#303030",
+  danger: "#FF7777",
 };
 
 const styles = StyleSheet.create({
@@ -896,8 +918,8 @@ const styles = StyleSheet.create({
     gap: 18,
   },
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 13,
   },
   iconButton: {
@@ -907,8 +929,8 @@ const styles = StyleSheet.create({
     backgroundColor: C.card,
     borderWidth: 1,
     borderColor: C.border,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
   headerText: {
     flex: 1,
@@ -917,21 +939,21 @@ const styles = StyleSheet.create({
   eyebrow: {
     color: C.accent,
     fontSize: 10,
-    fontWeight: '800',
+    fontWeight: "800",
     letterSpacing: 1.8,
   },
   headerTitle: {
     color: C.text,
     fontSize: 23,
-    fontWeight: '800',
+    fontWeight: "800",
   },
   headerIcon: {
     width: 44,
     height: 44,
     borderRadius: 15,
-    backgroundColor: '#242D1D',
-    alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: "#242D1D",
+    alignItems: "center",
+    justifyContent: "center",
   },
   intro: {
     gap: 8,
@@ -941,7 +963,7 @@ const styles = StyleSheet.create({
   title: {
     color: C.text,
     fontSize: 30,
-    fontWeight: '800',
+    fontWeight: "800",
     letterSpacing: -0.7,
   },
   accent: {
@@ -953,8 +975,8 @@ const styles = StyleSheet.create({
     lineHeight: 21,
   },
   stepHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 12,
     marginTop: 4,
   },
@@ -962,14 +984,14 @@ const styles = StyleSheet.create({
     width: 42,
     height: 42,
     borderRadius: 14,
-    backgroundColor: '#242D1D',
-    alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: "#242D1D",
+    alignItems: "center",
+    justifyContent: "center",
   },
   stepNumber: {
     color: C.accent,
     fontSize: 13,
-    fontWeight: '800',
+    fontWeight: "800",
   },
   stepText: {
     flex: 1,
@@ -978,7 +1000,7 @@ const styles = StyleSheet.create({
   sectionTitle: {
     color: C.text,
     fontSize: 17,
-    fontWeight: '700',
+    fontWeight: "700",
   },
   hint: {
     color: C.muted,
@@ -996,83 +1018,83 @@ const styles = StyleSheet.create({
   photoPlaceholder: {
     minHeight: 190,
     paddingHorizontal: 20,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     borderWidth: 1,
-    borderStyle: 'dashed',
-    borderColor: '#454545',
+    borderStyle: "dashed",
+    borderColor: "#454545",
     borderRadius: 15,
-    backgroundColor: '#151515',
+    backgroundColor: "#151515",
     gap: 10,
   },
   cameraCircle: {
     width: 62,
     height: 62,
     borderRadius: 22,
-    backgroundColor: '#242D1D',
-    alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: "#242D1D",
+    alignItems: "center",
+    justifyContent: "center",
     marginBottom: 3,
   },
   placeholderTitle: {
     color: C.text,
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: "700",
   },
   placeholderText: {
     color: C.muted,
     fontSize: 12,
     lineHeight: 18,
-    textAlign: 'center',
+    textAlign: "center",
   },
   imageWrap: {
-    position: 'relative',
+    position: "relative",
   },
   mealImage: {
-    width: '100%',
+    width: "100%",
     height: 245,
     borderRadius: 15,
     backgroundColor: C.cardAlt,
   },
   photoBadge: {
-    position: 'absolute',
+    position: "absolute",
     left: 10,
     bottom: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 6,
     paddingHorizontal: 10,
     paddingVertical: 8,
     borderRadius: 10,
-    backgroundColor: '#101010E8',
+    backgroundColor: "#101010E8",
   },
   photoBadgeText: {
     color: C.text,
     fontSize: 11,
-    fontWeight: '700',
+    fontWeight: "700",
   },
   removePhoto: {
-    position: 'absolute',
+    position: "absolute",
     right: 10,
     top: 10,
     width: 34,
     height: 34,
     borderRadius: 12,
-    backgroundColor: '#101010E8',
-    alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: "#101010E8",
+    alignItems: "center",
+    justifyContent: "center",
   },
   photoActions: {
-    flexDirection: 'row',
+    flexDirection: "row",
     gap: 10,
   },
   secondaryButton: {
     flex: 1,
     minHeight: 47,
-    flexDirection: 'row',
+    flexDirection: "row",
     gap: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     backgroundColor: C.cardAlt,
     borderWidth: 1,
     borderColor: C.border,
@@ -1082,14 +1104,14 @@ const styles = StyleSheet.create({
   secondaryButtonText: {
     color: C.text,
     fontSize: 13,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   primaryButton: {
     minHeight: 52,
-    flexDirection: 'row',
+    flexDirection: "row",
     gap: 9,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     backgroundColor: C.accent,
     borderRadius: 14,
     paddingHorizontal: 16,
@@ -1098,14 +1120,14 @@ const styles = StyleSheet.create({
   primaryButtonText: {
     color: C.bg,
     fontSize: 14,
-    fontWeight: '800',
+    fontWeight: "800",
   },
   disabledButton: {
     opacity: 0.45,
   },
   statusCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 13,
     backgroundColor: C.card,
     borderWidth: 1,
@@ -1120,7 +1142,7 @@ const styles = StyleSheet.create({
   statusTitle: {
     color: C.text,
     fontSize: 14,
-    fontWeight: '700',
+    fontWeight: "700",
   },
   results: {
     gap: 16,
@@ -1135,17 +1157,17 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   summaryTop: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 12,
   },
   summaryIcon: {
     width: 45,
     height: 45,
     borderRadius: 14,
-    backgroundColor: '#242D1D',
-    alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: "#242D1D",
+    alignItems: "center",
+    justifyContent: "center",
   },
   summaryInfo: {
     flex: 1,
@@ -1154,7 +1176,7 @@ const styles = StyleSheet.create({
   mealName: {
     color: C.text,
     fontSize: 18,
-    fontWeight: '800',
+    fontWeight: "800",
   },
   note: {
     color: C.accent,
@@ -1175,8 +1197,8 @@ const styles = StyleSheet.create({
     gap: 5,
   },
   foodCardHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 9,
     marginBottom: 6,
   },
@@ -1184,44 +1206,44 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 11,
-    backgroundColor: '#242D1D',
-    alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: "#242D1D",
+    alignItems: "center",
+    justifyContent: "center",
   },
   foodNumber: {
     color: C.accent,
     fontSize: 11,
-    fontWeight: '800',
+    fontWeight: "800",
   },
   itemLabel: {
     color: C.muted,
     fontSize: 10,
-    fontWeight: '800',
+    fontWeight: "800",
     letterSpacing: 1.1,
     flex: 1,
   },
   removeButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 5,
     padding: 5,
   },
   removeText: {
     color: C.danger,
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   inputLabel: {
-    color: '#B7B7B7',
+    color: "#B7B7B7",
     fontSize: 10,
-    fontWeight: '700',
+    fontWeight: "700",
     letterSpacing: 0.8,
     marginTop: 9,
     marginBottom: 5,
   },
   input: {
-    backgroundColor: '#111111',
-    borderColor: '#393939',
+    backgroundColor: "#111111",
+    borderColor: "#393939",
     borderWidth: 1,
     borderRadius: 11,
     paddingHorizontal: 12,
@@ -1232,10 +1254,10 @@ const styles = StyleSheet.create({
   },
   quantityInputRow: {
     minHeight: 46,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#111111',
-    borderColor: '#393939',
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: "#111111",
+    borderColor: "#393939",
     borderWidth: 1,
     borderRadius: 11,
     paddingHorizontal: 12,
@@ -1248,44 +1270,44 @@ const styles = StyleSheet.create({
   },
   unitBadge: {
     color: C.accent,
-    backgroundColor: '#242D1D',
-    overflow: 'hidden',
+    backgroundColor: "#242D1D",
+    overflow: "hidden",
     borderRadius: 8,
     paddingHorizontal: 9,
     paddingVertical: 7,
     fontSize: 9,
-    fontWeight: '800',
+    fontWeight: "800",
     letterSpacing: 1,
   },
   nutritionGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+    flexDirection: "row",
+    flexWrap: "wrap",
     columnGap: 10,
     rowGap: 4,
     marginTop: 2,
   },
   nutritionInput: {
-    width: '47%',
+    width: "47%",
     flexGrow: 1,
   },
   addFoodButton: {
     minHeight: 70,
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 12,
     padding: 13,
     borderRadius: 15,
     borderWidth: 1,
-    borderColor: '#526E38',
-    backgroundColor: '#1A2415',
+    borderColor: "#526E38",
+    backgroundColor: "#1A2415",
   },
   addFoodIcon: {
     width: 40,
     height: 40,
     borderRadius: 13,
     backgroundColor: C.accent,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
   addFoodTextContainer: {
     flex: 1,
@@ -1294,7 +1316,7 @@ const styles = StyleSheet.create({
   addFoodTitle: {
     color: C.accent,
     fontSize: 14,
-    fontWeight: '700',
+    fontWeight: "700",
   },
   addFoodSubtitle: {
     color: C.muted,
@@ -1303,7 +1325,7 @@ const styles = StyleSheet.create({
   addForm: {
     backgroundColor: C.card,
     borderWidth: 1,
-    borderColor: '#526E38',
+    borderColor: "#526E38",
     borderRadius: 17,
     padding: 15,
     gap: 5,
@@ -1311,7 +1333,7 @@ const styles = StyleSheet.create({
   addFormTitle: {
     color: C.text,
     fontSize: 17,
-    fontWeight: '800',
+    fontWeight: "800",
   },
   formHint: {
     color: C.muted,
@@ -1331,48 +1353,48 @@ const styles = StyleSheet.create({
   caloriePanel: {
     padding: 16,
     borderRadius: 16,
-    backgroundColor: '#222D1B',
+    backgroundColor: "#222D1B",
     gap: 8,
   },
   calorieIcon: {
     width: 39,
     height: 39,
     borderRadius: 12,
-    backgroundColor: '#303E25',
-    alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: "#303E25",
+    alignItems: "center",
+    justifyContent: "center",
     marginBottom: 2,
   },
   totalLabel: {
-    color: '#C4D5B0',
+    color: "#C4D5B0",
     fontSize: 10,
-    fontWeight: '800',
+    fontWeight: "800",
     letterSpacing: 1.4,
   },
   calorieRow: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
+    flexDirection: "row",
+    alignItems: "baseline",
     gap: 8,
   },
   calorieValue: {
     color: C.accent,
     fontSize: 38,
-    fontWeight: '900',
+    fontWeight: "900",
     letterSpacing: -1,
   },
   calorieUnit: {
     color: C.text,
     fontSize: 13,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   totalMacros: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+    flexDirection: "row",
+    flexWrap: "wrap",
     gap: 10,
   },
   macro: {
     flex: 1,
-    minWidth: '40%',
+    minWidth: "40%",
     padding: 12,
     borderRadius: 13,
     backgroundColor: C.cardAlt,
@@ -1383,7 +1405,7 @@ const styles = StyleSheet.create({
   macroValue: {
     color: C.text,
     fontSize: 18,
-    fontWeight: '800',
+    fontWeight: "800",
   },
   macroLabel: {
     color: C.muted,
@@ -1395,21 +1417,21 @@ const styles = StyleSheet.create({
     lineHeight: 17,
   },
   cancelButton: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
+    flexDirection: "row",
+    justifyContent: "center",
+    alignItems: "center",
     gap: 8,
     paddingVertical: 10,
   },
   cancelText: {
     color: C.muted,
     fontSize: 13,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   footer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
     gap: 8,
     paddingTop: 2,
   },
@@ -1420,9 +1442,9 @@ const styles = StyleSheet.create({
     backgroundColor: C.accent,
   },
   footerText: {
-    color: '#777777',
+    color: "#777777",
     fontSize: 9,
-    fontWeight: '700',
+    fontWeight: "700",
     letterSpacing: 1.2,
   },
 });

@@ -11,6 +11,7 @@ import { useFocusEffect } from "expo-router";
 
 import { getCurrentUser, isProfileComplete } from "../../lib/auth";
 import { supabase } from "../../lib/supabase";
+import { usePostHog } from "posthog-react-native";
 
 type FoodLog = {
   id: string;
@@ -76,6 +77,8 @@ const formatNumber = (value: number) =>
   Math.round(value).toLocaleString("en-IN");
 
 export default function HistoryScreen() {
+  const posthog = usePostHog();
+  
   const [days, setDays] = useState<DaySummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [dailyGoal, setDailyGoal] = useState<number | null>(null);
@@ -193,8 +196,9 @@ export default function HistoryScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      posthog.capture("history_viewed");
       void loadHistory();
-    }, []),
+    }, [posthog]),
   );
 
   const maxCalories = Math.max(

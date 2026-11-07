@@ -15,7 +15,9 @@ import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 
 import { supabase } from "../lib/supabase";
-import BiteLogMark from "../components/BiteLogoMark"
+import BiteLogMark from "../components/BiteLogoMark";
+import { usePostHog } from "posthog-react-native";
+import { Sentry } from "../lib/sentry";
 
 const C = {
   background: "#101010",
@@ -29,6 +31,8 @@ const C = {
 };
 
 export default function LoginScreen() {
+  const posthog = usePostHog();
+
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -54,20 +58,45 @@ export default function LoginScreen() {
       });
 
       if (error) {
+        Sentry.logger.warn("Login failed", {
+          operation: "login",
+          method: "email",
+        });
+
+        posthog.capture("login_failed", {
+          method: "email",
+          failure_stage: "authentication",
+        });
+
         Alert.alert("Login failed", error.message);
         return;
       }
 
-      console.log("LOGIN USER:", data.user);
-      console.log("LOGIN SESSION:", data.session);
-
       if (!data.session) {
+        Sentry.logger.warn("Login returned no session", {
+          operation: "login",
+        });
+
+        posthog.capture("login_failed", {
+          method: "email",
+          failure_stage: "missing_session",
+        });
+
         Alert.alert(
           "Login failed",
           "Login succeeded but no session was created.",
         );
         return;
       }
+
+      Sentry.logger.info("Login completed", {
+        operation: "login",
+        method: "email",
+      });
+
+      posthog.capture("login_completed", {
+        method: "email",
+      });
 
       const { data: existingGoal, error: goalError } = await supabase
         .from("calorie_goals")
@@ -78,7 +107,14 @@ export default function LoginScreen() {
         .maybeSingle();
 
       if (goalError) {
-        console.error("Failed to check existing calorie goal:", goalError);
+        Sentry.logger.error("Failed to load calorie goal after login", {
+          operation: "login",
+          stage: "goal_lookup",
+        });
+
+        Sentry.captureException(goalError);
+
+        posthog.capture("login_goal_lookup_failed");
 
         Alert.alert(
           "Could not load calorie goal",
@@ -93,7 +129,16 @@ export default function LoginScreen() {
         router.replace("/calorie-goal");
       }
     } catch (error) {
-      console.error("Login error:", error);
+      Sentry.logger.error("Unexpected login error", {
+        operation: "login",
+      });
+
+      Sentry.captureException(error);
+
+      posthog.capture("login_failed", {
+        method: "email",
+        failure_stage: "unexpected_error",
+      });
 
       Alert.alert("Something went wrong", "Please try again.");
     } finally {
@@ -250,11 +295,11 @@ const styles = StyleSheet.create({
 
   // Brand
   brand: {
-  flexDirection: "row",
-  alignItems: "center",
-  gap: 12,
-  marginBottom: 58,
-},
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    marginBottom: 58,
+  },
 
   brandIcon: {
     width: 35,
@@ -265,13 +310,12 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
 
-  
-brandName: {
-  color: C.text,
-  fontSize: 24,
-  fontWeight: "900",
-  letterSpacing: -0.8,
-},
+  brandName: {
+    color: C.text,
+    fontSize: 24,
+    fontWeight: "900",
+    letterSpacing: -0.8,
+  },
 
   brandAccent: {
     color: C.accent,

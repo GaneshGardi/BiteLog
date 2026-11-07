@@ -1,5 +1,4 @@
-
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -17,6 +16,8 @@ import { router } from "expo-router";
 import DateTimePicker from "@react-native-community/datetimepicker";
 
 import { supabase } from "../lib/supabase";
+import { usePostHog } from "posthog-react-native";
+import { Sentry } from "../lib/sentry";
 
 const C = {
   background: "#101010",
@@ -61,6 +62,15 @@ const genders = [
 ];
 
 export default function OnboardingScreen() {
+  const posthog = usePostHog();
+
+  useEffect(() => {
+    posthog.capture("onboarding_started");
+
+    Sentry.logger.info("Onboarding started", {
+      operation: "onboarding",
+    });
+  }, [posthog]);
   const [birthDate, setBirthDate] = useState("");
   const [gender, setGender] = useState("");
   const [height, setHeight] = useState("");
@@ -84,10 +94,7 @@ export default function OnboardingScreen() {
   };
 
   // Handle native date picker selection
-  const handleDateChange = (
-    event: { type: string },
-    selectedDate?: Date
-  ) => {
+  const handleDateChange = (event: { type: string }, selectedDate?: Date) => {
     setShowDatePicker(false);
 
     if (event.type === "set" && selectedDate) {
@@ -99,7 +106,7 @@ export default function OnboardingScreen() {
     }
   };
 
-  // Save onboarding details
+  // Handle native date picker selection
   const handleContinue = async () => {
     if (!birthDate || !gender || !height || !weight || !goal) {
       Alert.alert("Missing information", "Please complete all fields.");
@@ -128,6 +135,15 @@ export default function OnboardingScreen() {
       } = await supabase.auth.getUser();
 
       if (userError || !user) {
+        Sentry.logger.warn("Onboarding failed: no active session", {
+          operation: "onboarding",
+          stage: "session_lookup",
+        });
+
+        posthog.capture("onboarding_failed", {
+          failure_stage: "session_lookup",
+        });
+
         Alert.alert("Session expired", "Please log in again.");
         router.replace("/login");
         return;
@@ -145,14 +161,39 @@ export default function OnboardingScreen() {
         .eq("id", user.id);
 
       if (error) {
-        console.error("Profile update error:", error);
+        Sentry.logger.error("Onboarding profile save failed", {
+          operation: "onboarding",
+          stage: "profile_update",
+        });
+
+        Sentry.captureException(error);
+
+        posthog.capture("onboarding_failed", {
+          failure_stage: "profile_update",
+        });
+
         Alert.alert("Could not save profile", error.message);
         return;
       }
 
+      Sentry.logger.info("Onboarding completed", {
+        operation: "onboarding",
+      });
+
+      posthog.capture("onboarding_completed");
+
       router.replace("/calorie-goal");
     } catch (error) {
-      console.error("Onboarding error:", error);
+      Sentry.logger.error("Unexpected onboarding error", {
+        operation: "onboarding",
+      });
+
+      Sentry.captureException(error);
+
+      posthog.capture("onboarding_failed", {
+        failure_stage: "unexpected_error",
+      });
+
       Alert.alert("Something went wrong", "Please try again.");
     } finally {
       setLoading(false);
@@ -172,11 +213,7 @@ export default function OnboardingScreen() {
         {/* Brand */}
         <View style={styles.brand}>
           <View style={styles.brandIcon}>
-            <Ionicons
-              name="nutrition"
-              size={25}
-              color={C.background}
-            />
+            <Ionicons name="nutrition" size={25} color={C.background} />
           </View>
 
           <Text style={styles.brandName}>
@@ -188,9 +225,7 @@ export default function OnboardingScreen() {
         <View style={styles.header}>
           <Text style={styles.eyebrow}>LET'S GET STARTED</Text>
 
-          <Text style={styles.title}>
-            Build your{"\n"}personal profile.
-          </Text>
+          <Text style={styles.title}>Build your{"\n"}personal profile.</Text>
 
           <Text style={styles.subtitle}>
             A few details will help us personalize your calorie goals and track
@@ -207,28 +242,15 @@ export default function OnboardingScreen() {
             onPress={() => setShowDatePicker(true)}
             disabled={loading}
           >
-            <Ionicons
-              name="calendar-outline"
-              size={19}
-              color={C.muted}
-            />
+            <Ionicons name="calendar-outline" size={19} color={C.muted} />
 
-            <Text
-              style={[
-                styles.input,
-                !birthDate && { color: C.muted },
-              ]}
-            >
+            <Text style={[styles.input, !birthDate && { color: C.muted }]}>
               {birthDate
                 ? formatDateForDisplay(birthDate)
                 : "Select your date of birth"}
             </Text>
 
-            <Ionicons
-              name="chevron-down"
-              size={18}
-              color={C.muted}
-            />
+            <Ionicons name="chevron-down" size={18} color={C.muted} />
           </Pressable>
 
           {showDatePicker && (
@@ -294,11 +316,7 @@ export default function OnboardingScreen() {
           <Text style={styles.label}>Height</Text>
 
           <View style={styles.inputContainer}>
-            <Ionicons
-              name="resize-outline"
-              size={19}
-              color={C.muted}
-            />
+            <Ionicons name="resize-outline" size={19} color={C.muted} />
 
             <TextInput
               style={styles.input}
@@ -319,11 +337,7 @@ export default function OnboardingScreen() {
           <Text style={styles.label}>Weight</Text>
 
           <View style={styles.inputContainer}>
-            <Ionicons
-              name="barbell-outline"
-              size={19}
-              color={C.muted}
-            />
+            <Ionicons name="barbell-outline" size={19} color={C.muted} />
 
             <TextInput
               style={styles.input}
@@ -386,11 +400,7 @@ export default function OnboardingScreen() {
                   </View>
 
                   <Ionicons
-                    name={
-                      selected
-                        ? "checkmark-circle"
-                        : "ellipse-outline"
-                    }
+                    name={selected ? "checkmark-circle" : "ellipse-outline"}
                     size={21}
                     color={selected ? C.accent : C.muted}
                   />
@@ -415,11 +425,7 @@ export default function OnboardingScreen() {
               <>
                 <Text style={styles.buttonText}>Continue</Text>
 
-                <Ionicons
-                  name="arrow-forward"
-                  size={19}
-                  color={C.background}
-                />
+                <Ionicons name="arrow-forward" size={19} color={C.background} />
               </>
             )}
           </Pressable>

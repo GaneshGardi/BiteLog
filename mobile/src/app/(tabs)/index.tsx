@@ -1,4 +1,3 @@
-
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -29,6 +28,8 @@ import {
 
 import { getCurrentUser, isProfileComplete } from "../../lib/auth";
 import { supabase } from "../../lib/supabase";
+import { usePostHog } from "posthog-react-native";
+import { Sentry } from "../../lib/sentry";
 
 const BG = "#101010";
 const CARD = "#1A1A1A";
@@ -54,6 +55,8 @@ type FoodLog = {
 };
 
 export default function HomeScreen() {
+  const posthog = usePostHog();
+
   const [loading, setLoading] = useState(true);
   const [dailyCalories, setDailyCalories] = useState<number | null>(null);
   const [nutrition, setNutrition] = useState<DashboardNutrition>({
@@ -70,8 +73,6 @@ export default function HomeScreen() {
 
     try {
       const user = await getCurrentUser();
-
-      
 
       if (!user) {
         setLoading(false);
@@ -97,9 +98,7 @@ export default function HomeScreen() {
       if (goalError) {
         console.error("Failed to load calorie goal:", goalError);
       } else {
-        setDailyCalories(
-          goalData ? Number(goalData.daily_calories) : null,
-        );
+        setDailyCalories(goalData ? Number(goalData.daily_calories) : null);
       }
 
       const now = new Date();
@@ -167,8 +166,9 @@ export default function HomeScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      posthog.capture("dashboard_viewed");
       loadDashboard();
-    }, []),
+    }, [posthog]),
   );
 
   const deleteFoodLog = (foodLogId: string) => {
@@ -181,21 +181,50 @@ export default function HomeScreen() {
           text: "Delete",
           style: "destructive",
           onPress: async () => {
-            const { error } = await supabase
-              .from("food_logs")
-              .delete()
-              .eq("id", foodLogId);
+            try {
+              const { error } = await supabase
+                .from("food_logs")
+                .delete()
+                .eq("id", foodLogId);
 
-            if (error) {
-              console.error("Failed to delete food log:", error);
+              if (error) {
+                Sentry.logger.error("Food log deletion failed", {
+                  operation: "delete_food_log",
+                });
+
+                Sentry.captureException(error);
+
+                posthog.capture("food_log_delete_failed");
+
+                Alert.alert(
+                  "Delete failed",
+                  "Could not delete this food entry. Please try again.",
+                );
+
+                return;
+              }
+
+              Sentry.logger.info("Food log deleted", {
+                operation: "delete_food_log",
+              });
+
+              posthog.capture("food_log_deleted");
+
+              await loadDashboard();
+            } catch (error) {
+              Sentry.logger.error("Unexpected food log deletion error", {
+                operation: "delete_food_log",
+              });
+
+              Sentry.captureException(error);
+
+              posthog.capture("food_log_delete_failed");
+
               Alert.alert(
                 "Delete failed",
                 "Could not delete this food entry. Please try again.",
               );
-              return;
             }
-
-            await loadDashboard();
           },
         },
       ],
@@ -222,8 +251,7 @@ export default function HomeScreen() {
       ? Math.min(caloriesConsumed / dailyCalories, 1)
       : 0;
 
-  const overGoal =
-    dailyCalories !== null && caloriesConsumed > dailyCalories;
+  const overGoal = dailyCalories !== null && caloriesConsumed > dailyCalories;
 
   return (
     <View style={styles.screen}>
@@ -319,9 +347,7 @@ export default function HomeScreen() {
         <View style={styles.sectionHeader}>
           <View>
             <Text style={styles.sectionTitle}>Your macros</Text>
-            <Text style={styles.sectionSubtitle}>
-              Nutrients logged today
-            </Text>
+            <Text style={styles.sectionSubtitle}>Nutrients logged today</Text>
           </View>
           <Leaf size={20} color={ACCENT} />
         </View>
@@ -453,9 +479,7 @@ export default function HomeScreen() {
                     {food.food_name}
                   </Text>
                   <Text style={styles.foodQuantity}>
-                    {food.quantity}
-                    {" "}
-                    {food.unit}
+                    {food.quantity} {food.unit}
                   </Text>
                 </View>
 
@@ -497,11 +521,7 @@ type CalorieRingProps = {
   children: React.ReactNode;
 };
 
-function CalorieRing({
-  progress,
-  overGoal,
-  children,
-}: CalorieRingProps) {
+function CalorieRing({ progress, overGoal, children }: CalorieRingProps) {
   const size = 142;
   const strokeWidth = 10;
   const radius = (size - strokeWidth) / 2;

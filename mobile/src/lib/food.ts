@@ -1,4 +1,6 @@
+
 import { supabase } from './supabase';
+import { Sentry } from './sentry';
 
 export async function calculateFood(
   foodId: string,
@@ -16,14 +18,14 @@ export async function calculateFood(
     );
 
   if (error) {
-    console.error(
-      'calculate-food error:',
-      error
-    );
+    Sentry.logger.error('Food calculation failed', {
+      operation: 'calculate_food',
+    });
+
+    Sentry.captureException(error);
 
     throw new Error(
-      error.message ||
-        'Failed to calculate food nutrition'
+      error.message || 'Failed to calculate food nutrition'
     );
   }
 
@@ -48,14 +50,14 @@ export async function logFood(
     );
 
   if (error) {
-    console.error(
-      'log-food error:',
-      error
-    );
+    Sentry.logger.error('Food logging request failed', {
+      operation: 'log_food',
+    });
+
+    Sentry.captureException(error);
 
     throw new Error(
-      error.message ||
-        'Failed to save food'
+      error.message || 'Failed to save food'
     );
   }
 
@@ -65,8 +67,6 @@ export async function logFood(
 export async function saveFood(
   fdcId: number
 ) {
-  console.log('saveFood START:', fdcId);
-
   const { data, error } =
     await supabase.functions.invoke(
       'save-food',
@@ -77,36 +77,27 @@ export async function saveFood(
       }
     );
 
-  console.log('saveFood INVOKE DATA:', data);
-  console.log('saveFood INVOKE ERROR:', error);
-
   if (error) {
-    console.error(
-      'save-food error:',
-      error
-    );
+    Sentry.logger.error('Food reference save failed', {
+      operation: 'save_food_reference',
+    });
+
+    Sentry.captureException(error);
 
     throw new Error(
-      error.message ||
-        'Failed to save food reference'
+      error.message || 'Failed to save food reference'
     );
   }
 
   if (!data?.food?.id) {
-    console.log(
-      'saveFood INVALID DATA:',
-      data
-    );
+    Sentry.logger.error('Food reference returned invalid data', {
+      operation: 'save_food_reference',
+    });
 
     throw new Error(
       'Food was saved but no local food ID was returned'
     );
   }
-
-  console.log(
-    'saveFood RETURNING FOOD:',
-    data.food
-  );
 
   return data.food;
 }

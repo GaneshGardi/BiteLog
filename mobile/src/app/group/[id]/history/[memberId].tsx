@@ -1,58 +1,48 @@
-
+import { useEffect } from "react";
 import { Stack, useLocalSearchParams, useRouter } from "expo-router";
-import {
-  StyleSheet,
-  Text,
-  View,
-  Pressable,
-  StatusBar,
-} from "react-native";
+import { StyleSheet, Text, View, Pressable } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import GroupWeeklyHistory from "../../../../components/GroupWeeklyHistory";
+import { usePostHog } from "posthog-react-native";
 
 export default function GroupMemberHistoryScreen() {
   const router = useRouter();
+  const posthog = usePostHog();
 
   const params = useLocalSearchParams<{
     id: string | string[];
     memberId: string | string[];
   }>();
 
-  const groupId = Array.isArray(params.id)
-    ? params.id[0]
-    : params.id;
+  const groupId = Array.isArray(params.id) ? params.id[0] : params.id;
 
   const memberId = Array.isArray(params.memberId)
     ? params.memberId[0]
     : params.memberId;
 
+  // Track weekly history screen visits.
+  useEffect(() => {
+    if (!groupId || !memberId) return;
+
+    posthog.capture("group_member_history_viewed");
+  }, [groupId, memberId, posthog]);
+
   if (!groupId || !memberId) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.center}>
-          <Ionicons
-            name="alert-circle-outline"
-            size={42}
-            color="#B6F36B"
-          />
+          <Ionicons name="alert-circle-outline" size={42} color="#B6F36B" />
 
-          <Text style={styles.errorTitle}>
-            Unable to load history
-          </Text>
+          <Text style={styles.errorTitle}>Unable to load history</Text>
 
           <Text style={styles.errorText}>
             We couldn't find the selected member or group.
           </Text>
 
-          <Pressable
-            style={styles.backButton}
-            onPress={() => router.back()}
-          >
-            <Text style={styles.backButtonText}>
-              Go back
-            </Text>
+          <Pressable style={styles.backButton} onPress={() => router.back()}>
+            <Text style={styles.backButtonText}>Go back</Text>
           </Pressable>
         </View>
       </SafeAreaView>
@@ -76,21 +66,13 @@ export default function GroupMemberHistoryScreen() {
           onPress={() => router.back()}
           hitSlop={10}
         >
-          <Ionicons
-            name="chevron-back"
-            size={24}
-            color="#FFFFFF"
-          />
+          <Ionicons name="chevron-back" size={24} color="#FFFFFF" />
         </Pressable>
 
         <View style={styles.headerTextContainer}>
-          <Text style={styles.headerTitle}>
-            Weekly history
-          </Text>
+          <Text style={styles.headerTitle}>Weekly history</Text>
 
-          <Text style={styles.headerSubtitle}>
-            Calorie tracking overview
-          </Text>
+          <Text style={styles.headerSubtitle}>Calorie tracking overview</Text>
         </View>
       </View>
 

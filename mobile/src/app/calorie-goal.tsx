@@ -1,4 +1,3 @@
-
 import { useState } from "react";
 import {
   ActivityIndicator,
@@ -16,6 +15,8 @@ import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 
 import { supabase } from "../lib/supabase";
+import { usePostHog } from "posthog-react-native";
+import { Sentry } from "../lib/sentry";
 
 const C = {
   background: "#101010",
@@ -29,6 +30,8 @@ const C = {
 };
 
 export default function CalorieGoalScreen() {
+  const posthog = usePostHog();
+
   const [calories, setCalories] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -38,7 +41,7 @@ export default function CalorieGoalScreen() {
     if (!dailyCalories || dailyCalories <= 0) {
       Alert.alert(
         "Invalid calorie goal",
-        "Please enter a valid daily calorie goal."
+        "Please enter a valid daily calorie goal.",
       );
       return;
     }
@@ -52,32 +55,63 @@ export default function CalorieGoalScreen() {
       } = await supabase.auth.getUser();
 
       if (userError || !user) {
-        Alert.alert(
-          "Session error",
-          "Please log in again."
-        );
-        return;
-      }
-
-      const { error } = await supabase
-        .from("calorie_goals")
-        .insert({
-          user_id: user.id,
-          daily_calories: dailyCalories,
-          effective_at: new Date().toISOString(),
+        Sentry.logger.warn("Calorie goal save failed: no active session", {
+          operation: "save_calorie_goal",
         });
 
-      if (error) {
-        console.error("Failed to save calorie goal:", error);
+        posthog.capture("calorie_goal_update_failed", {
+          failure_stage: "session_lookup",
+        });
 
-        Alert.alert(
-          "Could not save goal",
-          error.message
-        );
+        Alert.alert("Session error", "Please log in again.");
         return;
       }
 
+      const { error } = await supabase.from("calorie_goals").insert({
+        user_id: user.id,
+        daily_calories: dailyCalories,
+        effective_at: new Date().toISOString(),
+      });
+
+      if (error) {
+        Sentry.logger.error("Calorie goal save failed", {
+          operation: "save_calorie_goal",
+        });
+
+        Sentry.captureException(error);
+
+        posthog.capture("calorie_goal_update_failed", {
+          failure_stage: "database_insert",
+        });
+
+        Alert.alert("Could not save goal", error.message);
+        return;
+      }
+
+      Sentry.logger.info("Calorie goal saved", {
+        operation: "save_calorie_goal",
+      });
+
+      posthog.capture("calorie_goal_updated", {
+        source: "initial_setup",
+      });
+
       router.replace("/");
+    } catch (error) {
+      Sentry.logger.error("Unexpected calorie goal save error", {
+        operation: "save_calorie_goal",
+      });
+
+      Sentry.captureException(error);
+
+      posthog.capture("calorie_goal_update_failed", {
+        failure_stage: "unexpected_error",
+      });
+
+      Alert.alert(
+        "Could not save goal",
+        "Something went wrong. Please try again.",
+      );
     } finally {
       setSaving(false);
     }
@@ -96,11 +130,7 @@ export default function CalorieGoalScreen() {
         {/* Brand */}
         <View style={styles.brand}>
           <View style={styles.brandIcon}>
-            <Ionicons
-              name="nutrition"
-              size={25}
-              color={C.background}
-            />
+            <Ionicons name="nutrition" size={25} color={C.background} />
           </View>
 
           <Text style={styles.brandName}>
@@ -110,33 +140,23 @@ export default function CalorieGoalScreen() {
 
         {/* Heading */}
         <View style={styles.header}>
-          <Text style={styles.eyebrow}>
-            ONE LAST STEP
-          </Text>
+          <Text style={styles.eyebrow}>ONE LAST STEP</Text>
 
-          <Text style={styles.title}>
-            Set your daily{"\n"}calorie goal.
-          </Text>
+          <Text style={styles.title}>Set your daily{"\n"}calorie goal.</Text>
 
           <Text style={styles.subtitle}>
-            Choose your daily calorie target. We'll use it
-            to help you monitor your progress every day.
+            Choose your daily calorie target. We'll use it to help you monitor
+            your progress every day.
           </Text>
         </View>
 
         {/* Calorie input card */}
         <View style={styles.goalCard}>
           <View style={styles.calorieIcon}>
-            <Ionicons
-              name="flame"
-              size={25}
-              color={C.accent}
-            />
+            <Ionicons name="flame" size={25} color={C.accent} />
           </View>
 
-          <Text style={styles.cardLabel}>
-            YOUR DAILY TARGET
-          </Text>
+          <Text style={styles.cardLabel}>YOUR DAILY TARGET</Text>
 
           <View style={styles.inputWrapper}>
             <TextInput
@@ -152,19 +172,13 @@ export default function CalorieGoalScreen() {
               onSubmitEditing={handleSave}
             />
 
-            <Text style={styles.unit}>
-              kcal
-            </Text>
+            <Text style={styles.unit}>kcal</Text>
           </View>
 
           <View style={styles.divider} />
 
           <View style={styles.dailyInfo}>
-            <Ionicons
-              name="calendar-outline"
-              size={16}
-              color={C.secondary}
-            />
+            <Ionicons name="calendar-outline" size={16} color={C.secondary} />
 
             <Text style={styles.dailyInfoText}>
               Your target will be tracked daily.
@@ -181,8 +195,8 @@ export default function CalorieGoalScreen() {
           />
 
           <Text style={styles.infoText}>
-            You can update your calorie goal later as your
-            fitness goals and progress change.
+            You can update your calorie goal later as your fitness goals and
+            progress change.
           </Text>
         </View>
 
@@ -200,26 +214,16 @@ export default function CalorieGoalScreen() {
             <ActivityIndicator color={C.background} />
           ) : (
             <>
-              <Text style={styles.buttonText}>
-                Save & Continue
-              </Text>
+              <Text style={styles.buttonText}>Save & Continue</Text>
 
-              <Ionicons
-                name="arrow-forward"
-                size={19}
-                color={C.background}
-              />
+              <Ionicons name="arrow-forward" size={19} color={C.background} />
             </>
           )}
         </Pressable>
 
         {/* Footer */}
         <View style={styles.footer}>
-          <Ionicons
-            name="shield-checkmark-outline"
-            size={14}
-            color={C.muted}
-          />
+          <Ionicons name="shield-checkmark-outline" size={14} color={C.muted} />
 
           <Text style={styles.footerText}>
             Your goals. Your progress. Your journey.

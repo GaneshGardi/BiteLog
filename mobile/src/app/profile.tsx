@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -10,66 +10,69 @@ import {
   Text,
   TextInput,
   View,
-} from 'react-native';
-import { useRouter } from 'expo-router';
-import { supabase } from '../lib/supabase';
+} from "react-native";
+import { useRouter } from "expo-router";
+import { supabase } from "../lib/supabase";
+import { usePostHog } from "posthog-react-native";
+import { Sentry } from "../lib/sentry";
 
-type Gender = 'male' | 'female' | 'other' | 'prefer_not_to_say';
-type Goal = 'lose' | 'maintain' | 'gain';
+type Gender = "male" | "female" | "other" | "prefer_not_to_say";
+type Goal = "lose" | "maintain" | "gain";
 
 type ProfileData = {
   username: string;
   display_name: string;
   birth_date: string;
-  gender: Gender | '';
+  gender: Gender | "";
   height_cm: string;
   weight_kg: string;
-  goal: Goal | '';
+  goal: Goal | "";
 };
 
 const COLORS = {
-  background: '#101010',
-  card: '#1A1A1A',
-  input: '#141414',
-  accent: '#B6F36B',
-  text: '#FFFFFF',
-  secondary: '#A0A0A0',
-  muted: '#707070',
-  border: '#303030',
-  danger: '#FF7777',
+  background: "#101010",
+  card: "#1A1A1A",
+  input: "#141414",
+  accent: "#B6F36B",
+  text: "#FFFFFF",
+  secondary: "#A0A0A0",
+  muted: "#707070",
+  border: "#303030",
+  danger: "#FF7777",
 };
 
 const initialProfile: ProfileData = {
-  username: '',
-  display_name: '',
-  birth_date: '',
-  gender: '',
-  height_cm: '',
-  weight_kg: '',
-  goal: '',
+  username: "",
+  display_name: "",
+  birth_date: "",
+  gender: "",
+  height_cm: "",
+  weight_kg: "",
+  goal: "",
 };
 
 const genderOptions: { label: string; value: Gender }[] = [
-  { label: 'Male', value: 'male' },
-  { label: 'Female', value: 'female' },
-  { label: 'Other', value: 'other' },
-  { label: 'Prefer not to say', value: 'prefer_not_to_say' },
+  { label: "Male", value: "male" },
+  { label: "Female", value: "female" },
+  { label: "Other", value: "other" },
+  { label: "Prefer not to say", value: "prefer_not_to_say" },
 ];
 
 const goalOptions: { label: string; value: Goal }[] = [
-  { label: 'Lose weight', value: 'lose' },
-  { label: 'Maintain', value: 'maintain' },
-  { label: 'Gain weight', value: 'gain' },
+  { label: "Lose weight", value: "lose" },
+  { label: "Maintain", value: "maintain" },
+  { label: "Gain weight", value: "gain" },
 ];
 
 export default function ProfileScreen() {
+  const posthog = usePostHog();
   const router = useRouter();
 
   const [profile, setProfile] = useState<ProfileData>(initialProfile);
-  const [dailyCalories, setDailyCalories] = useState('');
+  const [dailyCalories, setDailyCalories] = useState("");
   const [savedCalories, setSavedCalories] = useState<number | null>(null);
-  const [email, setEmail] = useState('');
-  const [userId, setUserId] = useState('');
+  const [email, setEmail] = useState("");
+  const [userId, setUserId] = useState("");
 
   const [loading, setLoading] = useState(true);
   const [savingProfile, setSavingProfile] = useState(false);
@@ -88,46 +91,42 @@ export default function ProfileScreen() {
       if (authError) throw authError;
 
       if (!user) {
-        router.replace('/login');
+        router.replace("/login");
         return;
       }
 
       setUserId(user.id);
-      setEmail(user.email ?? '');
+      setEmail(user.email ?? "");
 
       const { data: profileData, error: profileError } = await supabase
-        .from('profiles')
+        .from("profiles")
         .select(
-          'username, display_name, birth_date, gender, height_cm, weight_kg, goal'
+          "username, display_name, birth_date, gender, height_cm, weight_kg, goal",
         )
-        .eq('id', user.id)
+        .eq("id", user.id)
         .maybeSingle();
 
       if (profileError) throw profileError;
 
       if (profileData) {
         setProfile({
-          username: profileData.username ?? '',
-          display_name: profileData.display_name ?? '',
-          birth_date: profileData.birth_date ?? '',
-          gender: profileData.gender ?? '',
+          username: profileData.username ?? "",
+          display_name: profileData.display_name ?? "",
+          birth_date: profileData.birth_date ?? "",
+          gender: profileData.gender ?? "",
           height_cm:
-            profileData.height_cm != null
-              ? String(profileData.height_cm)
-              : '',
+            profileData.height_cm != null ? String(profileData.height_cm) : "",
           weight_kg:
-            profileData.weight_kg != null
-              ? String(profileData.weight_kg)
-              : '',
-          goal: profileData.goal ?? '',
+            profileData.weight_kg != null ? String(profileData.weight_kg) : "",
+          goal: profileData.goal ?? "",
         });
       }
 
       const { data: calorieGoal, error: calorieError } = await supabase
-        .from('calorie_goals')
-        .select('daily_calories')
-        .eq('user_id', user.id)
-        .order('effective_at', { ascending: false })
+        .from("calorie_goals")
+        .select("daily_calories")
+        .eq("user_id", user.id)
+        .order("effective_at", { ascending: false })
         .limit(1)
         .maybeSingle();
 
@@ -140,8 +139,8 @@ export default function ProfileScreen() {
       }
     } catch (error: any) {
       Alert.alert(
-        'Unable to load profile',
-        error?.message ?? 'Something went wrong while loading your profile.'
+        "Unable to load profile",
+        error?.message ?? "Something went wrong while loading your profile.",
       );
     } finally {
       setLoading(false);
@@ -154,7 +153,7 @@ export default function ProfileScreen() {
 
   const updateField = <K extends keyof ProfileData>(
     field: K,
-    value: ProfileData[K]
+    value: ProfileData[K],
   ) => {
     setProfile((current) => ({
       ...current,
@@ -167,8 +166,8 @@ export default function ProfileScreen() {
 
     if (!/^[a-z0-9_]{3,24}$/.test(username)) {
       Alert.alert(
-        'Invalid username',
-        'Use 3–24 characters: lowercase letters, numbers, and underscores only.'
+        "Invalid username",
+        "Use 3–24 characters: lowercase letters, numbers, and underscores only.",
       );
       return false;
     }
@@ -178,8 +177,8 @@ export default function ProfileScreen() {
 
       if (!datePattern.test(profile.birth_date.trim())) {
         Alert.alert(
-          'Invalid birth date',
-          'Enter your birth date in YYYY-MM-DD format, for example 2002-08-15.'
+          "Invalid birth date",
+          "Enter your birth date in YYYY-MM-DD format, for example 2002-08-15.",
         );
         return false;
       }
@@ -191,8 +190,8 @@ export default function ProfileScreen() {
         date.toISOString().slice(0, 10) !== profile.birth_date.trim()
       ) {
         Alert.alert(
-          'Invalid birth date',
-          'Please enter a valid calendar date.'
+          "Invalid birth date",
+          "Please enter a valid calendar date.",
         );
         return false;
       }
@@ -203,8 +202,8 @@ export default function ProfileScreen() {
 
       if (!Number.isFinite(height) || height <= 0 || height > 300) {
         Alert.alert(
-          'Invalid height',
-          'Enter a height greater than 0 and no more than 300 cm.'
+          "Invalid height",
+          "Enter a height greater than 0 and no more than 300 cm.",
         );
         return false;
       }
@@ -215,8 +214,8 @@ export default function ProfileScreen() {
 
       if (!Number.isFinite(weight) || weight <= 0 || weight > 700) {
         Alert.alert(
-          'Invalid weight',
-          'Enter a weight greater than 0 and no more than 700 kg.'
+          "Invalid weight",
+          "Enter a weight greater than 0 and no more than 700 kg.",
         );
         return false;
       }
@@ -226,7 +225,7 @@ export default function ProfileScreen() {
       profile.gender &&
       !genderOptions.some((option) => option.value === profile.gender)
     ) {
-      Alert.alert('Invalid gender', 'Please select a valid option.');
+      Alert.alert("Invalid gender", "Please select a valid option.");
       return false;
     }
 
@@ -234,7 +233,7 @@ export default function ProfileScreen() {
       profile.goal &&
       !goalOptions.some((option) => option.value === profile.goal)
     ) {
-      Alert.alert('Invalid goal', 'Please select a valid goal.');
+      Alert.alert("Invalid goal", "Please select a valid goal.");
       return false;
     }
 
@@ -248,7 +247,7 @@ export default function ProfileScreen() {
 
     try {
       const { error } = await supabase
-        .from('profiles')
+        .from("profiles")
         .update({
           username: profile.username.trim().toLowerCase(),
           display_name: profile.display_name.trim() || null,
@@ -263,7 +262,7 @@ export default function ProfileScreen() {
           goal: profile.goal || null,
           updated_at: new Date().toISOString(),
         })
-        .eq('id', userId);
+        .eq("id", userId);
 
       if (error) throw error;
 
@@ -274,20 +273,20 @@ export default function ProfileScreen() {
         birth_date: current.birth_date.trim(),
       }));
 
-      Alert.alert('Profile updated', 'Your changes have been saved.');
+      Alert.alert("Profile updated", "Your changes have been saved.");
     } catch (error: any) {
-      const message = error?.message ?? 'Unable to save your profile.';
+      const message = error?.message ?? "Unable to save your profile.";
 
       if (
-        message.toLowerCase().includes('duplicate') ||
-        message.toLowerCase().includes('unique')
+        message.toLowerCase().includes("duplicate") ||
+        message.toLowerCase().includes("unique")
       ) {
         Alert.alert(
-          'Username unavailable',
-          'That username is already taken. Please choose another one.'
+          "Username unavailable",
+          "That username is already taken. Please choose another one.",
         );
       } else {
-        Alert.alert('Could not save profile', message);
+        Alert.alert("Could not save profile", message);
       }
     } finally {
       setSavingProfile(false);
@@ -306,16 +305,16 @@ export default function ProfileScreen() {
       calories > 10000
     ) {
       Alert.alert(
-        'Invalid calorie goal',
-        'Enter a whole number between 500 and 10,000 calories.'
+        "Invalid calorie goal",
+        "Enter a whole number between 500 and 10,000 calories.",
       );
       return;
     }
 
     if (calories === savedCalories) {
       Alert.alert(
-        'No changes',
-        'Your daily calorie goal is already set to this value.'
+        "No changes",
+        "Your daily calorie goal is already set to this value.",
       );
       return;
     }
@@ -324,7 +323,7 @@ export default function ProfileScreen() {
 
     try {
       // Insert a new entry so previous calorie-goal history is preserved.
-      const { error } = await supabase.from('calorie_goals').insert({
+      const { error } = await supabase.from("calorie_goals").insert({
         user_id: userId,
         daily_calories: calories,
         effective_at: new Date().toISOString(),
@@ -334,14 +333,32 @@ export default function ProfileScreen() {
 
       setSavedCalories(calories);
 
+      Sentry.logger.info("Calorie goal updated", {
+        operation: "update_calorie_goal",
+      });
+
+      posthog.capture("calorie_goal_updated", {
+        source: "profile",
+      });
+
       Alert.alert(
-        'Calorie goal updated',
-        `Your daily target is now ${calories.toLocaleString()} calories.`
+        "Calorie goal updated",
+        `Your daily target is now ${calories.toLocaleString()} calories.`,
       );
     } catch (error: any) {
+      Sentry.logger.error("Calorie goal update failed", {
+        operation: "update_calorie_goal",
+      });
+
+      Sentry.captureException(error);
+
+      posthog.capture("calorie_goal_update_failed", {
+        failure_stage: "database_insert",
+      });
+
       Alert.alert(
-        'Could not update calorie goal',
-        error?.message ?? 'Something went wrong while saving your goal.'
+        "Could not update calorie goal",
+        error?.message ?? "Something went wrong while saving your goal.",
       );
     } finally {
       setSavingCalories(false);
@@ -349,24 +366,40 @@ export default function ProfileScreen() {
   };
 
   const logout = () => {
-    Alert.alert('Log out', 'Are you sure you want to log out?', [
-      { text: 'Cancel', style: 'cancel' },
+    Alert.alert("Log out", "Are you sure you want to log out?", [
+      { text: "Cancel", style: "cancel" },
       {
-        text: 'Log out',
-        style: 'destructive',
+        text: "Log out",
+        style: "destructive",
         onPress: async () => {
           setLoggingOut(true);
+
+          posthog.capture("logout_started");
 
           try {
             const { error } = await supabase.auth.signOut();
 
             if (error) throw error;
 
-            router.replace('/login');
+            Sentry.logger.info("Logout completed", {
+              operation: "logout",
+            });
+
+            posthog.capture("logout_completed");
+
+            router.replace("/login");
           } catch (error: any) {
+            Sentry.logger.error("Logout failed", {
+              operation: "logout",
+            });
+
+            Sentry.captureException(error);
+
+            posthog.capture("logout_failed");
+
             Alert.alert(
-              'Logout failed',
-              error?.message ?? 'Unable to log out. Please try again.'
+              "Logout failed",
+              error?.message ?? "Unable to log out. Please try again.",
             );
           } finally {
             setLoggingOut(false);
@@ -377,7 +410,7 @@ export default function ProfileScreen() {
   };
 
   const displayName =
-    profile.display_name.trim() || profile.username.trim() || 'Your profile';
+    profile.display_name.trim() || profile.username.trim() || "Your profile";
 
   const avatarLetter = displayName.charAt(0).toUpperCase();
 
@@ -393,7 +426,7 @@ export default function ProfileScreen() {
   return (
     <KeyboardAvoidingView
       style={styles.screen}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
       <ScrollView
         style={styles.scrollView}
@@ -427,10 +460,10 @@ export default function ProfileScreen() {
               {displayName}
             </Text>
             <Text style={styles.identityUsername} numberOfLines={1}>
-              @{profile.username || 'username'}
+              @{profile.username || "username"}
             </Text>
             <Text style={styles.identityEmail} numberOfLines={1}>
-              {email || 'No email available'}
+              {email || "No email available"}
             </Text>
           </View>
 
@@ -459,8 +492,8 @@ export default function ProfileScreen() {
               </View>
               <Text style={styles.calorieHint}>
                 {savedCalories == null
-                  ? 'Set your first daily target below.'
-                  : 'Your current daily calorie target.'}
+                  ? "Set your first daily target below."
+                  : "Your current daily calorie target."}
               </Text>
             </View>
           </View>
@@ -515,7 +548,7 @@ export default function ProfileScreen() {
           <TextInput
             style={styles.input}
             value={profile.username}
-            onChangeText={(value) => updateField('username', value)}
+            onChangeText={(value) => updateField("username", value)}
             placeholder="your_username"
             placeholderTextColor={COLORS.muted}
             autoCapitalize="none"
@@ -530,7 +563,7 @@ export default function ProfileScreen() {
           <TextInput
             style={styles.input}
             value={profile.display_name}
-            onChangeText={(value) => updateField('display_name', value)}
+            onChangeText={(value) => updateField("display_name", value)}
             placeholder="What should we call you?"
             placeholderTextColor={COLORS.muted}
             autoCapitalize="words"
@@ -541,7 +574,7 @@ export default function ProfileScreen() {
           <TextInput
             style={styles.input}
             value={profile.birth_date}
-            onChangeText={(value) => updateField('birth_date', value)}
+            onChangeText={(value) => updateField("birth_date", value)}
             placeholder="YYYY-MM-DD"
             placeholderTextColor={COLORS.muted}
             keyboardType="numbers-and-punctuation"
@@ -560,10 +593,7 @@ export default function ProfileScreen() {
                 <Pressable
                   key={option.value}
                   onPress={() =>
-                    updateField(
-                      'gender',
-                      selected ? '' : option.value
-                    )
+                    updateField("gender", selected ? "" : option.value)
                   }
                   style={[
                     styles.optionChip,
@@ -590,7 +620,7 @@ export default function ProfileScreen() {
                 <TextInput
                   style={styles.unitInput}
                   value={profile.height_cm}
-                  onChangeText={(value) => updateField('height_cm', value)}
+                  onChangeText={(value) => updateField("height_cm", value)}
                   placeholder="172"
                   placeholderTextColor={COLORS.muted}
                   keyboardType="decimal-pad"
@@ -606,7 +636,7 @@ export default function ProfileScreen() {
                 <TextInput
                   style={styles.unitInput}
                   value={profile.weight_kg}
-                  onChangeText={(value) => updateField('weight_kg', value)}
+                  onChangeText={(value) => updateField("weight_kg", value)}
                   placeholder="68"
                   placeholderTextColor={COLORS.muted}
                   keyboardType="decimal-pad"
@@ -626,7 +656,7 @@ export default function ProfileScreen() {
                 <Pressable
                   key={option.value}
                   onPress={() =>
-                    updateField('goal', selected ? '' : option.value)
+                    updateField("goal", selected ? "" : option.value)
                   }
                   style={[
                     styles.goalOption,
@@ -707,7 +737,9 @@ export default function ProfileScreen() {
           </Pressable>
         </View>
 
-        <Text style={styles.footerText}>FUN TRACKER · YOUR JOURNEY, YOUR PACE</Text>
+        <Text style={styles.footerText}>
+          FUN TRACKER · YOUR JOURNEY, YOUR PACE
+        </Text>
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -730,8 +762,8 @@ const styles = StyleSheet.create({
   loadingContainer: {
     flex: 1,
     backgroundColor: COLORS.background,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     gap: 12,
   },
   loadingText: {
@@ -740,22 +772,22 @@ const styles = StyleSheet.create({
   },
 
   header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
     marginBottom: 24,
   },
   eyebrow: {
     color: COLORS.accent,
     fontSize: 10,
-    fontWeight: '800',
+    fontWeight: "800",
     letterSpacing: 2,
     marginBottom: 8,
   },
   pageTitle: {
     color: COLORS.text,
     fontSize: 32,
-    fontWeight: '800',
+    fontWeight: "800",
     letterSpacing: -0.8,
   },
   pageSubtitle: {
@@ -767,21 +799,21 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 16,
-    backgroundColor: '#222A1C',
+    backgroundColor: "#222A1C",
     borderWidth: 1,
-    borderColor: '#39482A',
-    alignItems: 'center',
-    justifyContent: 'center',
+    borderColor: "#39482A",
+    alignItems: "center",
+    justifyContent: "center",
   },
   headerIconText: {
     color: COLORS.accent,
     fontSize: 27,
-    fontWeight: '700',
+    fontWeight: "700",
   },
 
   identityCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     backgroundColor: COLORS.card,
     borderRadius: 20,
     borderWidth: 1,
@@ -794,13 +826,13 @@ const styles = StyleSheet.create({
     height: 58,
     borderRadius: 19,
     backgroundColor: COLORS.accent,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
   avatarText: {
     color: COLORS.background,
     fontSize: 25,
-    fontWeight: '900',
+    fontWeight: "900",
   },
   identityInfo: {
     flex: 1,
@@ -810,7 +842,7 @@ const styles = StyleSheet.create({
   identityName: {
     color: COLORS.text,
     fontSize: 17,
-    fontWeight: '800',
+    fontWeight: "800",
   },
   identityUsername: {
     color: COLORS.accent,
@@ -830,22 +862,22 @@ const styles = StyleSheet.create({
   },
 
   sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     marginBottom: 12,
     marginTop: 4,
   },
   sectionTitle: {
     color: COLORS.text,
     fontSize: 18,
-    fontWeight: '800',
+    fontWeight: "800",
     letterSpacing: -0.3,
   },
   sectionCaption: {
     color: COLORS.muted,
     fontSize: 9,
-    fontWeight: '700',
+    fontWeight: "700",
     letterSpacing: 1.1,
   },
 
@@ -858,18 +890,18 @@ const styles = StyleSheet.create({
     marginBottom: 28,
   },
   calorieTopRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
   },
   calorieIcon: {
     width: 48,
     height: 48,
     borderRadius: 15,
-    backgroundColor: '#222A1C',
+    backgroundColor: "#222A1C",
     borderWidth: 1,
-    borderColor: '#39482A',
-    alignItems: 'center',
-    justifyContent: 'center',
+    borderColor: "#39482A",
+    alignItems: "center",
+    justifyContent: "center",
   },
   calorieIconText: {
     fontSize: 22,
@@ -882,24 +914,24 @@ const styles = StyleSheet.create({
   cardLabel: {
     color: COLORS.secondary,
     fontSize: 9,
-    fontWeight: '700',
+    fontWeight: "700",
     letterSpacing: 1.2,
   },
   calorieValueRow: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
+    flexDirection: "row",
+    alignItems: "baseline",
     marginTop: 4,
   },
   calorieValue: {
     color: COLORS.text,
     fontSize: 30,
-    fontWeight: '900',
+    fontWeight: "900",
     letterSpacing: -0.8,
   },
   calorieUnit: {
     color: COLORS.accent,
     fontSize: 13,
-    fontWeight: '700',
+    fontWeight: "700",
     marginLeft: 7,
   },
   calorieHint: {
@@ -916,7 +948,7 @@ const styles = StyleSheet.create({
   fieldLabel: {
     color: COLORS.text,
     fontSize: 12,
-    fontWeight: '700',
+    fontWeight: "700",
     marginBottom: 9,
     marginTop: 16,
   },
@@ -930,7 +962,7 @@ const styles = StyleSheet.create({
     color: COLORS.muted,
     fontSize: 10,
     lineHeight: 15,
-    textAlign: 'center',
+    textAlign: "center",
     marginTop: 12,
   },
 
@@ -945,8 +977,8 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
   calorieInputRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     backgroundColor: COLORS.input,
     borderWidth: 1,
     borderColor: COLORS.border,
@@ -958,7 +990,7 @@ const styles = StyleSheet.create({
     height: 49,
     color: COLORS.text,
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: "700",
   },
   calorieInputUnit: {
     color: COLORS.secondary,
@@ -969,15 +1001,15 @@ const styles = StyleSheet.create({
     minHeight: 49,
     borderRadius: 13,
     backgroundColor: COLORS.accent,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     paddingHorizontal: 16,
     marginTop: 16,
   },
   primaryButtonText: {
     color: COLORS.background,
     fontSize: 13,
-    fontWeight: '900',
+    fontWeight: "900",
   },
   buttonDisabled: {
     opacity: 0.6,
@@ -996,8 +1028,8 @@ const styles = StyleSheet.create({
     marginBottom: 28,
   },
   optionsWrap: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+    flexDirection: "row",
+    flexWrap: "wrap",
     gap: 8,
   },
   optionChip: {
@@ -1009,29 +1041,29 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   optionChipSelected: {
-    backgroundColor: '#222A1C',
+    backgroundColor: "#222A1C",
     borderColor: COLORS.accent,
   },
   optionText: {
     color: COLORS.secondary,
     fontSize: 11,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   optionTextSelected: {
     color: COLORS.accent,
-    fontWeight: '800',
+    fontWeight: "800",
   },
 
   twoColumnRow: {
-    flexDirection: 'row',
+    flexDirection: "row",
     gap: 12,
   },
   halfField: {
     flex: 1,
   },
   unitInputRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     backgroundColor: COLORS.input,
     borderWidth: 1,
     borderColor: COLORS.border,
@@ -1053,8 +1085,8 @@ const styles = StyleSheet.create({
     gap: 9,
   },
   goalOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     backgroundColor: COLORS.input,
     borderWidth: 1,
     borderColor: COLORS.border,
@@ -1064,7 +1096,7 @@ const styles = StyleSheet.create({
   },
   goalOptionSelected: {
     borderColor: COLORS.accent,
-    backgroundColor: '#20271B',
+    backgroundColor: "#20271B",
   },
   radioOuter: {
     width: 17,
@@ -1072,8 +1104,8 @@ const styles = StyleSheet.create({
     borderRadius: 9,
     borderWidth: 1.5,
     borderColor: COLORS.muted,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     marginRight: 11,
   },
   radioOuterSelected: {
@@ -1088,19 +1120,19 @@ const styles = StyleSheet.create({
   goalOptionText: {
     color: COLORS.secondary,
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   goalOptionTextSelected: {
     color: COLORS.text,
-    fontWeight: '800',
+    fontWeight: "800",
   },
   profileSaveButton: {
     marginTop: 24,
   },
 
   accountCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     backgroundColor: COLORS.card,
     borderWidth: 1,
     borderColor: COLORS.border,
@@ -1111,14 +1143,14 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 13,
-    backgroundColor: '#2A1D1D',
-    alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: "#2A1D1D",
+    alignItems: "center",
+    justifyContent: "center",
   },
   accountIconText: {
     color: COLORS.danger,
     fontSize: 22,
-    fontWeight: '700',
+    fontWeight: "700",
   },
   accountInfo: {
     flex: 1,
@@ -1128,7 +1160,7 @@ const styles = StyleSheet.create({
   accountTitle: {
     color: COLORS.text,
     fontSize: 13,
-    fontWeight: '800',
+    fontWeight: "800",
   },
   accountSubtitle: {
     color: COLORS.secondary,
@@ -1138,8 +1170,8 @@ const styles = StyleSheet.create({
   },
   logoutButton: {
     borderWidth: 1,
-    borderColor: '#573232',
-    backgroundColor: '#2A1D1D',
+    borderColor: "#573232",
+    backgroundColor: "#2A1D1D",
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 10,
@@ -1150,15 +1182,15 @@ const styles = StyleSheet.create({
   logoutButtonText: {
     color: COLORS.danger,
     fontSize: 11,
-    fontWeight: '800',
+    fontWeight: "800",
   },
 
   footerText: {
     color: COLORS.muted,
     fontSize: 9,
-    fontWeight: '700',
+    fontWeight: "700",
     letterSpacing: 1.1,
-    textAlign: 'center',
+    textAlign: "center",
     marginTop: 28,
   },
 });

@@ -1,5 +1,4 @@
-
-import { useState } from 'react';
+import { useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -10,8 +9,8 @@ import {
   Text,
   TextInput,
   View,
-} from 'react-native';
-import { router } from 'expo-router';
+} from "react-native";
+import { router } from "expo-router";
 import {
   ArrowLeft,
   Search,
@@ -26,14 +25,12 @@ import {
   ChevronRight,
   Plus,
   X,
-} from 'lucide-react-native';
+} from "lucide-react-native";
 
-import { supabase } from '@/lib/supabase';
-import {
-  calculateFood,
-  logFood,
-  saveFood,
-} from '@/lib/food';
+import { supabase } from "@/lib/supabase";
+import { calculateFood, logFood, saveFood } from "@/lib/food";
+import { usePostHog } from "posthog-react-native";
+import { Sentry } from "@/lib/sentry";
 
 type FoodSearchResult = {
   fdcId: number;
@@ -71,24 +68,26 @@ type CalculationResult = {
 };
 
 const C = {
-  bg: '#101010',
-  card: '#1A1A1A',
-  cardAlt: '#202020',
-  accent: '#B6F36B',
-  text: '#F5F5F5',
-  muted: '#969696',
-  border: '#303030',
-  danger: '#FF7777',
+  bg: "#101010",
+  card: "#1A1A1A",
+  cardAlt: "#202020",
+  accent: "#B6F36B",
+  text: "#F5F5F5",
+  muted: "#969696",
+  border: "#303030",
+  danger: "#FF7777",
 };
 
 export default function AddFoodScreen() {
-  const [search, setSearch] = useState('');
-  const [quantity, setQuantity] = useState('');
+  const posthog = usePostHog();
+
+  const [search, setSearch] = useState("");
+  const [quantity, setQuantity] = useState("");
   const [foods, setFoods] = useState<FoodSearchResult[]>([]);
-  const [selectedFood, setSelectedFood] =
-    useState<SelectedFood | null>(null);
-  const [calculation, setCalculation] =
-    useState<CalculationResult | null>(null);
+  const [selectedFood, setSelectedFood] = useState<SelectedFood | null>(null);
+  const [calculation, setCalculation] = useState<CalculationResult | null>(
+    null,
+  );
 
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -98,10 +97,7 @@ export default function AddFoodScreen() {
     const query = search.trim();
 
     if (!query) {
-      Alert.alert(
-        'Enter a food',
-        'Try chicken, rice, oats, or another food.'
-      );
+      Alert.alert("Enter a food", "Try chicken, rice, oats, or another food.");
       return;
     }
 
@@ -111,13 +107,12 @@ export default function AddFoodScreen() {
     setFoods([]);
     setSelectedFood(null);
     setCalculation(null);
-    setQuantity('');
+    setQuantity("");
 
     try {
-      const { data, error } =
-        await supabase.functions.invoke('search-food', {
-          body: { query },
-        });
+      const { data, error } = await supabase.functions.invoke("search-food", {
+        body: { query },
+      });
 
       if (error) {
         throw new Error(error.message);
@@ -126,10 +121,10 @@ export default function AddFoodScreen() {
       setFoods(data?.foods ?? []);
       setHasSearched(true);
     } catch (error) {
-      console.error('Food search failed:', error);
+      console.error("Food search failed:", error);
       Alert.alert(
-        'Search failed',
-        'Could not search for food right now. Please try again.'
+        "Search failed",
+        "Could not search for food right now. Please try again.",
       );
     } finally {
       setLoading(false);
@@ -150,14 +145,14 @@ export default function AddFoodScreen() {
         source: savedFood.source ?? null,
       });
 
-      setQuantity('');
+      setQuantity("");
       setFoods([]);
       setHasSearched(false);
     } catch (error) {
-      console.error('Saving food reference failed:', error);
+      console.error("Saving food reference failed:", error);
       Alert.alert(
-        'Could not select food',
-        'This food could not be added to the food database.'
+        "Could not select food",
+        "This food could not be added to the food database.",
       );
     } finally {
       setLoading(false);
@@ -166,24 +161,21 @@ export default function AddFoodScreen() {
 
   async function calculateSelectedFood() {
     if (!selectedFood) {
-      Alert.alert('Select a food', 'Choose a food first.');
+      Alert.alert("Select a food", "Choose a food first.");
       return;
     }
 
     const quantityG = Number(quantity);
 
     if (!Number.isFinite(quantityG) || quantityG <= 0) {
-      Alert.alert(
-        'Invalid quantity',
-        'Enter a quantity greater than 0 grams.'
-      );
+      Alert.alert("Invalid quantity", "Enter a quantity greater than 0 grams.");
       return;
     }
 
     if (quantityG > 100000) {
       Alert.alert(
-        'Quantity too large',
-        'Please enter a quantity of 100,000 grams or less.'
+        "Quantity too large",
+        "Please enter a quantity of 100,000 grams or less.",
       );
       return;
     }
@@ -193,16 +185,13 @@ export default function AddFoodScreen() {
     setCalculation(null);
 
     try {
-      const result = await calculateFood(
-        selectedFood.id,
-        quantityG
-      );
+      const result = await calculateFood(selectedFood.id, quantityG);
       setCalculation(result);
     } catch (error) {
-      console.error('Food calculation failed:', error);
+      console.error("Food calculation failed:", error);
       Alert.alert(
-        'Calculation failed',
-        'Could not calculate nutrition. Please try again.'
+        "Calculation failed",
+        "Could not calculate nutrition. Please try again.",
       );
     } finally {
       setLoading(false);
@@ -220,31 +209,48 @@ export default function AddFoodScreen() {
       const now = new Date();
       const today = [
         now.getFullYear(),
-        String(now.getMonth() + 1).padStart(2, '0'),
-        String(now.getDate()).padStart(2, '0'),
-      ].join('-');
+        String(now.getMonth() + 1).padStart(2, "0"),
+        String(now.getDate()).padStart(2, "0"),
+      ].join("-");
 
-      await logFood(
-        selectedFood.id,
-        calculation.quantity_g,
-        today
-      );
+      await logFood(selectedFood.id, calculation.quantity_g, today);
+
+      Sentry.logger.info("Food log created", {
+        operation: "food_log_created",
+        source: "manual",
+      });
+
+      posthog.capture("food_log_created", {
+        source: "manual",
+      });
 
       Alert.alert(
-        'Food added!',
+        "Food added!",
         `${selectedFood.name} has been added to today's log.`,
         [
           {
-            text: 'Done',
+            text: "Done",
             onPress: () => router.back(),
           },
-        ]
+        ],
       );
     } catch (error) {
-      console.error('Food logging failed:', error);
+      Sentry.logger.warn("Food log could not be completed", {
+        operation: "food_log_created",
+        source: "manual",
+      });
+
+      Sentry.captureException(error);
+
+      posthog.capture("food_log_failed", {
+        source: "manual",
+      });
+
+      console.error("Food logging failed:", error);
+
       Alert.alert(
-        'Could not save',
-        'Your food could not be added. Please try again.'
+        "Could not save",
+        "Your food could not be added. Please try again.",
       );
     } finally {
       setSaving(false);
@@ -254,7 +260,7 @@ export default function AddFoodScreen() {
   function resetSelection() {
     setSelectedFood(null);
     setCalculation(null);
-    setQuantity('');
+    setQuantity("");
   }
 
   return (
@@ -299,9 +305,7 @@ export default function AddFoodScreen() {
         </View>
         <View style={styles.sectionHeadingText}>
           <Text style={styles.sectionTitle}>Find your food</Text>
-          <Text style={styles.sectionSubtitle}>
-            Search a food database
-          </Text>
+          <Text style={styles.sectionSubtitle}>Search a food database</Text>
         </View>
       </View>
 
@@ -321,7 +325,7 @@ export default function AddFoodScreen() {
           />
           {search.length > 0 && (
             <Pressable
-              onPress={() => setSearch('')}
+              onPress={() => setSearch("")}
               accessibilityRole="button"
               accessibilityLabel="Clear search"
               hitSlop={8}
@@ -332,10 +336,7 @@ export default function AddFoodScreen() {
         </View>
 
         <Pressable
-          style={[
-            styles.primaryButton,
-            loading && styles.disabledButton,
-          ]}
+          style={[styles.primaryButton, loading && styles.disabledButton]}
           onPress={searchFoods}
           disabled={loading || saving}
         >
@@ -353,9 +354,7 @@ export default function AddFoodScreen() {
       {loading && (
         <View style={styles.loadingRow}>
           <ActivityIndicator color={C.accent} size="small" />
-          <Text style={styles.mutedText}>
-            Finding your food...
-          </Text>
+          <Text style={styles.mutedText}>Finding your food...</Text>
         </View>
       )}
 
@@ -363,9 +362,7 @@ export default function AddFoodScreen() {
         <View style={styles.resultsSection}>
           <View style={styles.resultsHeader}>
             <Text style={styles.sectionTitle}>Search results</Text>
-            <Text style={styles.resultCount}>
-              {foods.length} found
-            </Text>
+            <Text style={styles.resultCount}>{foods.length} found</Text>
           </View>
 
           {foods.map((food) => (
@@ -426,13 +423,9 @@ export default function AddFoodScreen() {
               </View>
               <View style={styles.selectedInfo}>
                 <Text style={styles.selectedLabel}>SELECTED FOOD</Text>
-                <Text style={styles.selectedName}>
-                  {selectedFood.name}
-                </Text>
+                <Text style={styles.selectedName}>{selectedFood.name}</Text>
                 {!!selectedFood.source && (
-                  <Text style={styles.source}>
-                    {selectedFood.source}
-                  </Text>
+                  <Text style={styles.source}>{selectedFood.source}</Text>
                 )}
               </View>
               <Pressable
@@ -469,10 +462,7 @@ export default function AddFoodScreen() {
             </View>
 
             <Pressable
-              style={[
-                styles.primaryButton,
-                loading && styles.disabledButton,
-              ]}
+              style={[styles.primaryButton, loading && styles.disabledButton]}
               onPress={calculateSelectedFood}
               disabled={loading || saving}
             >
@@ -514,7 +504,7 @@ export default function AddFoodScreen() {
               <View style={styles.calorieValueRow}>
                 <Text style={styles.calorieValue}>
                   {calculation.nutrition.calories === null
-                    ? '—'
+                    ? "—"
                     : Math.round(calculation.nutrition.calories)}
                 </Text>
                 <Text style={styles.calorieUnit}>kcal</Text>
@@ -553,16 +543,13 @@ export default function AddFoodScreen() {
 
             <View style={styles.notice}>
               <Text style={styles.noticeText}>
-                Nutrition values are estimates. Actual values can vary
-                with ingredients and preparation.
+                Nutrition values are estimates. Actual values can vary with
+                ingredients and preparation.
               </Text>
             </View>
 
             <Pressable
-              style={[
-                styles.primaryButton,
-                saving && styles.disabledButton,
-              ]}
+              style={[styles.primaryButton, saving && styles.disabledButton]}
               onPress={confirmAndAdd}
               disabled={saving || loading}
             >
@@ -602,9 +589,7 @@ export default function AddFoodScreen() {
 
       <View style={styles.footer}>
         <View style={styles.footerDot} />
-        <Text style={styles.footerText}>
-          SMALL STEPS. CONSISTENT PROGRESS.
-        </Text>
+        <Text style={styles.footerText}>SMALL STEPS. CONSISTENT PROGRESS.</Text>
       </View>
     </ScrollView>
   );
@@ -628,7 +613,7 @@ function Macro({
         <Text style={styles.macroLabel}>{label}</Text>
       </View>
       <Text style={styles.macroValue}>
-        {value === null ? '—' : `${Number(value.toFixed(1))} ${suffix}`}
+        {value === null ? "—" : `${Number(value.toFixed(1))} ${suffix}`}
       </Text>
     </View>
   );
@@ -646,8 +631,8 @@ const styles = StyleSheet.create({
     gap: 22,
   },
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 13,
   },
   iconButton: {
@@ -657,8 +642,8 @@ const styles = StyleSheet.create({
     backgroundColor: C.card,
     borderWidth: 1,
     borderColor: C.border,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
   },
   headerTitleWrap: {
     flex: 1,
@@ -667,21 +652,21 @@ const styles = StyleSheet.create({
   headerEyebrow: {
     fontSize: 10,
     color: C.accent,
-    fontWeight: '800',
+    fontWeight: "800",
     letterSpacing: 2,
   },
   headerTitle: {
     fontSize: 23,
-    fontWeight: '800',
+    fontWeight: "800",
     color: C.text,
   },
   headerIcon: {
     width: 44,
     height: 44,
     borderRadius: 15,
-    backgroundColor: '#242D1D',
-    alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: "#242D1D",
+    alignItems: "center",
+    justifyContent: "center",
   },
   intro: {
     gap: 8,
@@ -690,7 +675,7 @@ const styles = StyleSheet.create({
   title: {
     color: C.text,
     fontSize: 31,
-    fontWeight: '800',
+    fontWeight: "800",
     letterSpacing: -0.8,
   },
   accentText: {
@@ -702,22 +687,22 @@ const styles = StyleSheet.create({
     lineHeight: 21,
   },
   sectionHeading: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 12,
   },
   stepBadge: {
     width: 42,
     height: 42,
     borderRadius: 14,
-    backgroundColor: '#242D1D',
-    alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: "#242D1D",
+    alignItems: "center",
+    justifyContent: "center",
   },
   stepNumber: {
     fontSize: 13,
     color: C.accent,
-    fontWeight: '800',
+    fontWeight: "800",
   },
   sectionHeadingText: {
     flex: 1,
@@ -725,7 +710,7 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     fontSize: 17,
-    fontWeight: '700',
+    fontWeight: "700",
     color: C.text,
   },
   sectionSubtitle: {
@@ -742,8 +727,8 @@ const styles = StyleSheet.create({
   },
   searchInputWrap: {
     minHeight: 52,
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 10,
     paddingHorizontal: 13,
     borderRadius: 13,
@@ -759,10 +744,10 @@ const styles = StyleSheet.create({
   },
   primaryButton: {
     minHeight: 51,
-    flexDirection: 'row',
+    flexDirection: "row",
     gap: 9,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: "center",
+    justifyContent: "center",
     paddingHorizontal: 16,
     borderRadius: 14,
     backgroundColor: C.accent,
@@ -770,15 +755,15 @@ const styles = StyleSheet.create({
   primaryButtonText: {
     color: C.bg,
     fontSize: 14,
-    fontWeight: '800',
+    fontWeight: "800",
   },
   disabledButton: {
     opacity: 0.55,
   },
   loadingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
     gap: 10,
     paddingVertical: 8,
   },
@@ -786,15 +771,15 @@ const styles = StyleSheet.create({
     color: C.muted,
     fontSize: 13,
     lineHeight: 20,
-    textAlign: 'center',
+    textAlign: "center",
   },
   resultsSection: {
     gap: 10,
   },
   resultsHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     marginBottom: 2,
   },
   resultCount: {
@@ -802,8 +787,8 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   foodResult: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 12,
     padding: 13,
     borderRadius: 16,
@@ -815,9 +800,9 @@ const styles = StyleSheet.create({
     width: 43,
     height: 43,
     borderRadius: 13,
-    backgroundColor: '#242D1D',
-    alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: "#242D1D",
+    alignItems: "center",
+    justifyContent: "center",
   },
   foodResultInfo: {
     flex: 1,
@@ -826,7 +811,7 @@ const styles = StyleSheet.create({
   foodName: {
     color: C.text,
     fontSize: 14,
-    fontWeight: '600',
+    fontWeight: "600",
     lineHeight: 20,
   },
   source: {
@@ -834,7 +819,7 @@ const styles = StyleSheet.create({
     fontSize: 11,
   },
   emptyCard: {
-    alignItems: 'center',
+    alignItems: "center",
     padding: 24,
     borderRadius: 18,
     backgroundColor: C.card,
@@ -845,7 +830,7 @@ const styles = StyleSheet.create({
   emptyTitle: {
     color: C.text,
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: "700",
   },
   selectedCard: {
     padding: 16,
@@ -856,17 +841,17 @@ const styles = StyleSheet.create({
     gap: 15,
   },
   selectedTop: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 11,
   },
   selectedIcon: {
     width: 43,
     height: 43,
     borderRadius: 14,
-    backgroundColor: '#242D1D',
-    alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: "#242D1D",
+    alignItems: "center",
+    justifyContent: "center",
   },
   selectedInfo: {
     flex: 1,
@@ -875,13 +860,13 @@ const styles = StyleSheet.create({
   selectedLabel: {
     color: C.accent,
     fontSize: 9,
-    fontWeight: '800',
+    fontWeight: "800",
     letterSpacing: 1.5,
   },
   selectedName: {
     color: C.text,
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: "700",
   },
   smallIconButton: {
     padding: 9,
@@ -895,12 +880,12 @@ const styles = StyleSheet.create({
   inputLabel: {
     color: C.muted,
     fontSize: 10,
-    fontWeight: '800',
+    fontWeight: "800",
     letterSpacing: 1.5,
   },
   quantityRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 10,
     minHeight: 54,
     paddingHorizontal: 13,
@@ -924,7 +909,7 @@ const styles = StyleSheet.create({
   gramText: {
     color: C.accent,
     fontSize: 10,
-    fontWeight: '800',
+    fontWeight: "800",
     letterSpacing: 1,
   },
   nutritionCard: {
@@ -938,51 +923,51 @@ const styles = StyleSheet.create({
   caloriePanel: {
     padding: 17,
     borderRadius: 17,
-    backgroundColor: '#222D1B',
+    backgroundColor: "#222D1B",
     gap: 8,
   },
   calorieIcon: {
     width: 39,
     height: 39,
     borderRadius: 12,
-    backgroundColor: '#303E25',
-    alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: "#303E25",
+    alignItems: "center",
+    justifyContent: "center",
     marginBottom: 2,
   },
   calorieLabel: {
-    color: '#C4D5B0',
+    color: "#C4D5B0",
     fontSize: 10,
-    fontWeight: '800',
+    fontWeight: "800",
     letterSpacing: 1.5,
   },
   calorieValueRow: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
+    flexDirection: "row",
+    alignItems: "baseline",
     gap: 8,
   },
   calorieValue: {
     color: C.accent,
     fontSize: 39,
-    fontWeight: '800',
+    fontWeight: "800",
     letterSpacing: -1,
   },
   calorieUnit: {
     color: C.text,
     fontSize: 13,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   calorieFootnote: {
-    color: '#C4D5B0',
+    color: "#C4D5B0",
     fontSize: 12,
   },
   macroGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
+    flexDirection: "row",
+    flexWrap: "wrap",
     gap: 10,
   },
   macroCard: {
-    width: '48%',
+    width: "48%",
     flexGrow: 1,
     minHeight: 91,
     padding: 13,
@@ -993,19 +978,19 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   macroHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
+    flexDirection: "row",
+    alignItems: "center",
     gap: 7,
   },
   macroLabel: {
     color: C.muted,
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   macroValue: {
     color: C.text,
     fontSize: 20,
-    fontWeight: '800',
+    fontWeight: "800",
   },
   notice: {
     padding: 12,
@@ -1018,30 +1003,30 @@ const styles = StyleSheet.create({
     lineHeight: 17,
   },
   secondaryButton: {
-    alignItems: 'center',
+    alignItems: "center",
     paddingVertical: 10,
   },
   secondaryButtonText: {
     color: C.muted,
     fontSize: 13,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   cancelButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
     gap: 8,
     paddingVertical: 8,
   },
   cancelText: {
     color: C.muted,
     fontSize: 13,
-    fontWeight: '600',
+    fontWeight: "600",
   },
   footer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
     gap: 8,
     paddingTop: 4,
   },
@@ -1052,9 +1037,9 @@ const styles = StyleSheet.create({
     backgroundColor: C.accent,
   },
   footerText: {
-    color: '#777777',
+    color: "#777777",
     fontSize: 9,
-    fontWeight: '700',
+    fontWeight: "700",
     letterSpacing: 1.4,
   },
 });
