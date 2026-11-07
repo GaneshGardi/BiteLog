@@ -75,6 +75,7 @@ export default function GroupDetailsScreen() {
   const [progressError, setProgressError] = useState("");
 
   const [inviteVisible, setInviteVisible] = useState(false);
+  const [selectedUser, setSelectedUser] = useState<SearchUser | null>(null);
   const [username, setUsername] = useState("");
   const [searchResults, setSearchResults] = useState<SearchUser[]>([]);
   const [searching, setSearching] = useState(false);
@@ -189,7 +190,20 @@ export default function GroupDetailsScreen() {
   useEffect(() => {
     const searchTerm = username.trim();
 
+    const normalizedSearchTerm = searchTerm.replace(/^@/, "").toLowerCase();
+
     setSearchError("");
+
+    // Preserve the selected friend in the results.
+    if (
+      selectedUser &&
+      selectedUser.username.toLowerCase() === normalizedSearchTerm
+    ) {
+      setSearchResults([selectedUser]);
+      setSearching(false);
+      return;
+    }
+
     setSearchResults([]);
 
     if (searchTerm.length < 2 || !inviteVisible) {
@@ -214,6 +228,7 @@ export default function GroupDetailsScreen() {
       } catch (error) {
         if (!cancelled) {
           console.error("Username search failed:", error);
+
           setSearchError(
             "Search is temporarily unavailable. You can still enter a username directly.",
           );
@@ -229,19 +244,23 @@ export default function GroupDetailsScreen() {
       cancelled = true;
       clearTimeout(timeout);
     };
-  }, [username, inviteVisible]);
+  }, [username, inviteVisible, selectedUser]);
 
   const closeInviteModal = () => {
     if (sending) return;
 
     setInviteVisible(false);
     setUsername("");
+    setSelectedUser(null);
     setSearchResults([]);
     setSearchError("");
   };
 
   const sendInvitation = async () => {
-    const targetUsername = username.trim().replace(/^@/, "");
+    const targetUsername = (selectedUser?.username ?? username.trim()).replace(
+      /^@/,
+      "",
+    );
 
     if (!targetUsername) {
       Alert.alert(
@@ -274,6 +293,7 @@ export default function GroupDetailsScreen() {
 
       setInviteVisible(false);
       setUsername("");
+      setSelectedUser(null);
       setSearchResults([]);
       setSearchError("");
 
@@ -634,7 +654,10 @@ export default function GroupDetailsScreen() {
                   placeholder="Search username..."
                   placeholderTextColor="#777777"
                   value={username}
-                  onChangeText={setUsername}
+                  onChangeText={(text) => {
+                    setUsername(text);
+                    setSelectedUser(null);
+                  }}
                   autoCapitalize="none"
                   autoCorrect={false}
                   returnKeyType="send"
@@ -669,14 +692,30 @@ export default function GroupDetailsScreen() {
                     const displayName =
                       user.display_name?.trim() || user.username;
 
+                    const isSelected = selectedUser?.user_id === user.user_id;
+
                     return (
                       <Pressable
                         key={user.user_id}
-                        style={styles.resultRow}
-                        onPress={() => setUsername(user.username)}
+                        style={({ pressed }) => [
+                          styles.resultRow,
+                          isSelected && styles.resultRowSelected,
+                          pressed && styles.resultRowPressed,
+                        ]}
+                        onPress={() => {
+                          setSelectedUser(user);
+                          setUsername(user.username);
+                        }}
                         disabled={sending}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected: isSelected }}
                       >
-                        <View style={styles.resultAvatar}>
+                        <View
+                          style={[
+                            styles.resultAvatar,
+                            isSelected && styles.resultAvatarSelected,
+                          ]}
+                        >
                           <Text style={styles.resultAvatarText}>
                             {displayName.charAt(0).toUpperCase()}
                           </Text>
@@ -684,12 +723,32 @@ export default function GroupDetailsScreen() {
 
                         <View style={styles.resultInfo}>
                           <Text style={styles.resultName}>{displayName}</Text>
+
                           <Text style={styles.usernameLabel}>
                             @{user.username}
                           </Text>
                         </View>
 
-                        <Text style={styles.selectLabel}>Select</Text>
+                        <View style={styles.selectionIndicator}>
+                          <Ionicons
+                            name={
+                              isSelected
+                                ? "checkmark-circle"
+                                : "ellipse-outline"
+                            }
+                            size={20}
+                            color={isSelected ? "#B6F36B" : "#666666"}
+                          />
+
+                          <Text
+                            style={[
+                              styles.selectLabel,
+                              isSelected && styles.selectedLabel,
+                            ]}
+                          >
+                            {isSelected ? "Selected" : "Select"}
+                          </Text>
+                        </View>
                       </Pressable>
                     );
                   })}
@@ -1318,5 +1377,32 @@ const styles = StyleSheet.create({
     color: "#999999",
     fontSize: 13,
     fontWeight: "700",
+  },
+
+  resultRowSelected: {
+    backgroundColor: "#252D20",
+    borderWidth: 1,
+    borderColor: "#46543A",
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    marginBottom: 8,
+  },
+
+  resultRowPressed: {
+    opacity: 0.75,
+  },
+
+  resultAvatarSelected: {
+    backgroundColor: "#34452A",
+  },
+
+  selectionIndicator: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+  },
+
+  selectedLabel: {
+    color: "#B6F36B",
   },
 });
