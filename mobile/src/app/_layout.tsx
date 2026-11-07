@@ -1,20 +1,12 @@
+import { Sentry } from "../lib/sentry";
 
-import { Sentry } from '../lib/sentry';
+import { useEffect, useRef, useState } from "react";
+import { Stack, useRouter, useSegments } from "expo-router";
+import { View } from "react-native";
+import { PostHogProvider, usePostHog } from "posthog-react-native";
 
-import { useEffect, useRef, useState } from 'react';
-import {
-  Stack,
-  useRouter,
-  useSegments,
-} from 'expo-router';
-import { View } from 'react-native';
-import {
-  PostHogProvider,
-  usePostHog,
-} from 'posthog-react-native';
-
-import { supabase } from '../lib/supabase';
-import { AnimatedSplashOverlay } from '../components/animated-icon';
+import { supabase } from "../lib/supabase";
+import { AnimatedSplashOverlay } from "../components/animated-icon";
 
 function RootLayoutContent() {
   const router = useRouter();
@@ -30,10 +22,10 @@ function RootLayoutContent() {
   useEffect(() => {
     let mounted = true;
 
-    Sentry.logger.info('BiteLog app started');
+    Sentry.logger.info("BiteLog app started");
 
     // Record one app-open event per app launch.
-    posthog.capture('app_opened');
+    posthog.capture("app_opened");
 
     function syncSession(session: any) {
       if (!mounted) return;
@@ -53,9 +45,7 @@ function RootLayoutContent() {
         identifiedUserId.current = userId;
       }
 
-      Sentry.setUser(
-        session?.user ? { id: session.user.id } : null
-      );
+      Sentry.setUser(session?.user ? { id: session.user.id } : null);
 
       setIsAuthenticated(!!session);
       setSessionLoading(false);
@@ -69,7 +59,7 @@ function RootLayoutContent() {
 
     supabase.auth.getSession().then(({ data: { session }, error }) => {
       if (error) {
-        console.error('Failed to restore auth session:', error);
+        console.error("Failed to restore auth session:", error);
       }
 
       syncSession(session);
@@ -86,36 +76,33 @@ function RootLayoutContent() {
 
     const currentRoute = segments[0];
 
-    const isAuthRoute =
-      currentRoute === 'login' || currentRoute === 'signup';
+    const isAuthRoute = currentRoute === "login" || currentRoute === "signup";
 
     if (!isAuthenticated && !isAuthRoute) {
-      router.replace('/login');
+      router.replace("/login");
       return;
     }
 
     if (isAuthenticated && isAuthRoute) {
-      router.replace('/(tabs)');
+      router.replace("/(tabs)");
     }
   }, [isAuthenticated, sessionLoading, segments, router]);
 
   const showSplash = !animationFinished || sessionLoading;
 
   return (
-    <View style={{ flex: 1, backgroundColor: '#101010' }}>
+    <View style={{ flex: 1, backgroundColor: "#101010" }}>
       <Stack
         screenOptions={{
           headerShown: false,
           contentStyle: {
-            backgroundColor: '#101010',
+            backgroundColor: "#101010",
           },
         }}
       />
 
       {showSplash && (
-        <AnimatedSplashOverlay
-          onFinish={() => setAnimationFinished(true)}
-        />
+        <AnimatedSplashOverlay onFinish={() => setAnimationFinished(true)} />
       )}
     </View>
   );
@@ -124,11 +111,10 @@ function RootLayoutContent() {
 function RootLayout() {
   return (
     <PostHogProvider
-      projectToken={process.env.EXPO_PUBLIC_POSTHOG_API_KEY ?? ''}
+      projectToken={process.env.EXPO_PUBLIC_POSTHOG_API_KEY ?? ""}
       options={{
         host:
-          process.env.EXPO_PUBLIC_POSTHOG_HOST ??
-          'https://eu.i.posthog.com',
+          process.env.EXPO_PUBLIC_POSTHOG_HOST ?? "https://eu.i.posthog.com",
         captureAppLifecycleEvents: false,
         enableSessionReplay: false,
       }}
