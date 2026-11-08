@@ -231,6 +231,16 @@ export default function LoginScreen() {
             </Pressable>
           </View>
 
+          <View style={styles.forgotPasswordContainer}>
+            <Pressable
+              onPress={() => router.push("/forgot-password")}
+              disabled={loading}
+              hitSlop={8}
+            >
+              <Text style={styles.forgotPasswordText}>Forgot password?</Text>
+            </Pressable>
+          </View>
+
           {/* Login button */}
           <Pressable
             style={({ pressed }) => [
@@ -427,6 +437,17 @@ const styles = StyleSheet.create({
     color: C.accent,
     fontSize: 13,
     fontWeight: "800",
+  },
+
+  forgotPasswordContainer: {
+    alignItems: "flex-end",
+    marginTop: 12,
+  },
+
+  forgotPasswordText: {
+    color: C.accent,
+    fontSize: 12,
+    fontWeight: "700",
   },
 
   // Footer

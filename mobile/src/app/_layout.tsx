@@ -76,14 +76,24 @@ function RootLayoutContent() {
 
     const currentRoute = segments[0];
 
-    const isAuthRoute = currentRoute === "login" || currentRoute === "signup";
+    const publicRoutes = [
+      "login",
+      "signup",
+      "forgot-password",
+      "reset-password",
+    ];
 
-    if (!isAuthenticated && !isAuthRoute) {
+    const isPublicRoute = publicRoutes.includes(currentRoute);
+
+    if (!isAuthenticated && !isPublicRoute) {
       router.replace("/login");
       return;
     }
 
-    if (isAuthenticated && isAuthRoute) {
+    if (
+      isAuthenticated &&
+      (currentRoute === "login" || currentRoute === "signup")
+    ) {
       router.replace("/(tabs)");
     }
   }, [isAuthenticated, sessionLoading, segments, router]);
