@@ -7,6 +7,7 @@ import { PostHogProvider, usePostHog } from "posthog-react-native";
 
 import { supabase } from "../lib/supabase";
 import { AnimatedSplashOverlay } from "../components/animated-icon";
+import { AppDialogProvider } from "../contexts/AppDialogContext";
 
 function RootLayoutContent() {
   const router = useRouter();
@@ -130,7 +131,9 @@ function RootLayout() {
       }}
       autocapture={false}
     >
-      <RootLayoutContent />
+      <AppDialogProvider>
+        <RootLayoutContent />
+      </AppDialogProvider>
     </PostHogProvider>
   );
 }

@@ -1,10 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
   Pressable,
   RefreshControl,
   ScrollView,
@@ -21,6 +17,9 @@ import {
 } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
+
+import AppModal from "../../components/AppModal";
+import { useAppDialog } from "../../contexts/AppDialogContext";
 import { supabase } from "../../lib/supabase";
 import { usePostHog } from "posthog-react-native";
 import { Sentry } from "../../lib/sentry";
@@ -62,6 +61,7 @@ export default function GroupDetailsScreen() {
   const { id } = useLocalSearchParams<{ id: string | string[] }>();
   const router = useRouter();
   const posthog = usePostHog();
+  const { showDialog } = useAppDialog();
 
   const groupId = Array.isArray(id) ? id[0] : id;
 
@@ -113,7 +113,6 @@ export default function GroupDetailsScreen() {
 
       // Use the device's local calendar date, not UTC.
       const now = new Date();
-
       const localDate = [
         now.getFullYear(),
         String(now.getMonth() + 1).padStart(2, "0"),
@@ -132,7 +131,12 @@ export default function GroupDetailsScreen() {
         setDailyProgress((progressData ?? []) as DailyProgress[]);
         setProgressError("");
       } catch (error) {
-        console.error("Error loading group calorie progress:", error);
+        Sentry.logger.error("Group calorie progress failed to load", {
+          operation: "load_group_daily_progress",
+        });
+        Sentry.captureException(error);
+        posthog.capture("group_daily_progress_load_failed");
+
         setDailyProgress([]);
         setProgressError(
           "Could not load calorie progress. Pull down to retry.",
@@ -150,7 +154,6 @@ export default function GroupDetailsScreen() {
         if (profileError) throw profileError;
 
         const profileMap: Record<string, Profile> = {};
-
         (profileData ?? []).forEach((profile) => {
           profileMap[profile.id] = profile as Profile;
         });
@@ -160,17 +163,23 @@ export default function GroupDetailsScreen() {
         setProfiles({});
       }
     } catch (error) {
-      console.error("Error loading group details:", error);
+      Sentry.logger.error("Group details failed to load", {
+        operation: "load_group_details",
+      });
+      Sentry.captureException(error);
+      posthog.capture("group_details_load_failed");
 
-      Alert.alert(
+      showDialog(
         "Unable to load group",
         error instanceof Error ? error.message : "Please try again.",
+        [{ text: "OK" }],
+        { type: "error" },
       );
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [groupId]);
+  }, [groupId, posthog, showDialog]);
 
   useFocusEffect(
     useCallback(() => {
@@ -185,11 +194,9 @@ export default function GroupDetailsScreen() {
     void loadGroup();
   };
 
-  // Search while typing, with a short delay to avoid querying
-  // on every keystroke.
+  // Search while typing, with a short delay to avoid querying on every keystroke.
   useEffect(() => {
     const searchTerm = username.trim();
-
     const normalizedSearchTerm = searchTerm.replace(/^@/, "").toLowerCase();
 
     setSearchError("");
@@ -227,7 +234,11 @@ export default function GroupDetailsScreen() {
         }
       } catch (error) {
         if (!cancelled) {
-          console.error("Username search failed:", error);
+          Sentry.logger.error("Username search failed", {
+            operation: "search_users_for_invites",
+          });
+          Sentry.captureException(error);
+          posthog.capture("group_invitee_search_failed");
 
           setSearchError(
             "Search is temporarily unavailable. You can still enter a username directly.",
@@ -244,7 +255,7 @@ export default function GroupDetailsScreen() {
       cancelled = true;
       clearTimeout(timeout);
     };
-  }, [username, inviteVisible, selectedUser]);
+  }, [username, inviteVisible, selectedUser, posthog]);
 
   const closeInviteModal = () => {
     if (sending) return;
@@ -263,15 +274,22 @@ export default function GroupDetailsScreen() {
     );
 
     if (!targetUsername) {
-      Alert.alert(
+      showDialog(
         "Username required",
         "Enter the username of the person you want to invite.",
+        [{ text: "OK" }],
+        { type: "warning" },
       );
       return;
     }
 
     if (!groupId) {
-      Alert.alert("Group unavailable", "Reopen the group and try again.");
+      showDialog(
+        "Group unavailable",
+        "Reopen the group and try again.",
+        [{ text: "OK" }],
+        { type: "error" },
+      );
       return;
     }
 
@@ -288,7 +306,6 @@ export default function GroupDetailsScreen() {
       Sentry.logger.info("Group invitation sent", {
         operation: "send_group_invitation",
       });
-
       posthog.capture("group_invitation_sent");
 
       setInviteVisible(false);
@@ -297,27 +314,30 @@ export default function GroupDetailsScreen() {
       setSearchResults([]);
       setSearchError("");
 
-      Alert.alert(
+      showDialog(
         "Invitation sent!",
         `Your invitation to @${targetUsername} has been sent.`,
+        [{ text: "Done" }],
+        { type: "success" },
       );
     } catch (error) {
       Sentry.logger.error("Group invitation failed", {
         operation: "send_group_invitation",
       });
-
       Sentry.captureException(error);
-
       posthog.capture("group_invitation_failed", {
         failure_stage: "send_invitation",
       });
 
-      console.error("Error sending invitation:", error);
-
       const message =
         error instanceof Error ? error.message : "Please try again.";
 
-      Alert.alert("Could not send invitation", message);
+      showDialog(
+        "Could not send invitation",
+        message,
+        [{ text: "OK" }],
+        { type: "error" },
+      );
     } finally {
       setSending(false);
     }
@@ -360,7 +380,6 @@ export default function GroupDetailsScreen() {
           </View>
 
           <Text style={styles.heading}>Group not found</Text>
-
           <Text style={styles.muted}>
             You may not have access to this group.
           </Text>
@@ -373,6 +392,7 @@ export default function GroupDetailsScreen() {
         <ScrollView
           contentContainerStyle={styles.content}
           showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -436,7 +456,6 @@ export default function GroupDetailsScreen() {
           ) : (
             members.map((member) => {
               const profile = profiles[member.user_id];
-
               const progress = dailyProgress.find(
                 (item) => item.user_id === member.user_id,
               );
@@ -451,7 +470,6 @@ export default function GroupDetailsScreen() {
                 "Member";
 
               const consumed = Number(progress?.calories_consumed) || 0;
-
               const goal =
                 progress?.daily_calorie_goal == null
                   ? null
@@ -487,7 +505,6 @@ export default function GroupDetailsScreen() {
 
                     <View style={styles.memberInfo}>
                       <Text style={styles.memberName}>{displayName}</Text>
-
                       <Text style={styles.usernameLabel}>
                         {memberUsername
                           ? `@${memberUsername}`
@@ -528,7 +545,6 @@ export default function GroupDetailsScreen() {
                           {Math.round(consumed).toLocaleString()}
                           <Text style={styles.kcalLabel}> kcal</Text>
                         </Text>
-
                         <Text style={styles.calorieGoal}>
                           {goal !== null && goal > 0
                             ? `of ${Math.round(goal).toLocaleString()} kcal goal`
@@ -605,182 +621,154 @@ export default function GroupDetailsScreen() {
         </ScrollView>
       )}
 
-      {/* Invite modal */}
-      <Modal
+      {/* Invite friends modal */}
+      <AppModal
         visible={inviteVisible}
-        transparent
-        animationType="slide"
-        onRequestClose={closeInviteModal}
-        statusBarTranslucent
+        onClose={closeInviteModal}
+        title="Invite a friend"
+        subtitle="Find people by username or display name and invite them to your group."
+        presentation="bottom"
+        closeOnBackdropPress={!sending}
+        loading={sending}
+        footer={
+          <View style={styles.inviteModalFooter}>
+            <Pressable
+              style={[styles.sendButton, sending && styles.disabledButton]}
+              onPress={() => void sendInvitation()}
+              disabled={sending}
+            >
+              {sending ? (
+                <ActivityIndicator color="#101010" />
+              ) : (
+                <>
+                  <Ionicons name="send-outline" size={17} color="#101010" />
+                  <Text style={styles.sendButtonText}>Send invitation</Text>
+                </>
+              )}
+            </Pressable>
+
+            <Pressable
+              style={styles.cancelButton}
+              onPress={closeInviteModal}
+              disabled={sending}
+            >
+              <Text style={styles.cancelButtonText}>Cancel</Text>
+            </Pressable>
+          </View>
+        }
       >
-        <KeyboardAvoidingView
-          style={styles.modalOverlay}
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
-        >
-          <Pressable style={styles.modalBackdrop} onPress={closeInviteModal} />
+        <View style={styles.modalIcon}>
+          <Ionicons name="person-add" size={23} color="#B6F36B" />
+        </View>
 
-          <SafeAreaView style={styles.modalSafeArea} edges={["bottom"]}>
-            <View style={styles.modalContent}>
-              <View style={styles.modalHandle} />
+        <Text style={styles.inputLabel}>USERNAME</Text>
 
-              <View style={styles.modalHeader}>
-                <View style={styles.modalIcon}>
-                  <Ionicons name="person-add" size={23} color="#B6F36B" />
-                </View>
+        <View style={styles.inputContainer}>
+          <Ionicons name="search-outline" size={19} color="#777777" />
 
+          <TextInput
+            style={styles.input}
+            placeholder="Search username..."
+            placeholderTextColor="#777777"
+            value={username}
+            onChangeText={(text) => {
+              setUsername(text);
+              setSelectedUser(null);
+            }}
+            autoCapitalize="none"
+            autoCorrect={false}
+            returnKeyType="send"
+            onSubmitEditing={() => void sendInvitation()}
+            editable={!sending}
+            autoFocus
+          />
+
+          {searching && (
+            <ActivityIndicator size="small" color="#B6F36B" />
+          )}
+        </View>
+
+        {!!searchError && (
+          <Text style={styles.errorText}>{searchError}</Text>
+        )}
+
+        {username.trim().length >= 2 &&
+          !searching &&
+          !searchError &&
+          searchResults.length === 0 && (
+            <Text style={styles.searchStatusText}>
+              No matches. You can still invite by exact username.
+            </Text>
+          )}
+
+        {searchResults.length > 0 && (
+          <View style={styles.resultsContainer}>
+            <Text style={styles.resultsTitle}>MATCHING USERS</Text>
+
+            {searchResults.map((user) => {
+              const displayName =
+                user.display_name?.trim() || user.username;
+              const isSelected = selectedUser?.user_id === user.user_id;
+
+              return (
                 <Pressable
-                  style={styles.closeButton}
-                  onPress={closeInviteModal}
-                  disabled={sending}
-                >
-                  <Ionicons name="close" size={21} color="#AAAAAA" />
-                </Pressable>
-              </View>
-
-              <Text style={styles.modalTitle}>Invite a friend</Text>
-
-              <Text style={styles.modalDescription}>
-                Find people by username or display name and invite them to your
-                group.
-              </Text>
-
-              <Text style={styles.inputLabel}>USERNAME</Text>
-
-              <View style={styles.inputContainer}>
-                <Ionicons name="search-outline" size={19} color="#777777" />
-
-                <TextInput
-                  style={styles.input}
-                  placeholder="Search username..."
-                  placeholderTextColor="#777777"
-                  value={username}
-                  onChangeText={(text) => {
-                    setUsername(text);
-                    setSelectedUser(null);
+                  key={user.user_id}
+                  style={({ pressed }) => [
+                    styles.resultRow,
+                    isSelected && styles.resultRowSelected,
+                    pressed && styles.resultRowPressed,
+                  ]}
+                  onPress={() => {
+                    setSelectedUser(user);
+                    setUsername(user.username);
                   }}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  returnKeyType="send"
-                  onSubmitEditing={() => void sendInvitation()}
-                  editable={!sending}
-                  autoFocus
-                />
+                  disabled={sending}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: isSelected }}
+                >
+                  <View
+                    style={[
+                      styles.resultAvatar,
+                      isSelected && styles.resultAvatarSelected,
+                    ]}
+                  >
+                    <Text style={styles.resultAvatarText}>
+                      {displayName.charAt(0).toUpperCase()}
+                    </Text>
+                  </View>
 
-                {searching && (
-                  <ActivityIndicator size="small" color="#B6F36B" />
-                )}
-              </View>
+                  <View style={styles.resultInfo}>
+                    <Text style={styles.resultName}>{displayName}</Text>
+                    <Text style={styles.usernameLabel}>
+                      @{user.username}
+                    </Text>
+                  </View>
 
-              {!!searchError && (
-                <Text style={styles.errorText}>{searchError}</Text>
-              )}
-
-              {username.trim().length >= 2 &&
-                !searching &&
-                !searchError &&
-                searchResults.length === 0 && (
-                  <Text style={styles.searchStatusText}>
-                    No matches. You can still invite by exact username.
-                  </Text>
-                )}
-
-              {searchResults.length > 0 && (
-                <View style={styles.resultsContainer}>
-                  <Text style={styles.resultsTitle}>MATCHING USERS</Text>
-
-                  {searchResults.map((user) => {
-                    const displayName =
-                      user.display_name?.trim() || user.username;
-
-                    const isSelected = selectedUser?.user_id === user.user_id;
-
-                    return (
-                      <Pressable
-                        key={user.user_id}
-                        style={({ pressed }) => [
-                          styles.resultRow,
-                          isSelected && styles.resultRowSelected,
-                          pressed && styles.resultRowPressed,
-                        ]}
-                        onPress={() => {
-                          setSelectedUser(user);
-                          setUsername(user.username);
-                        }}
-                        disabled={sending}
-                        accessibilityRole="button"
-                        accessibilityState={{ selected: isSelected }}
-                      >
-                        <View
-                          style={[
-                            styles.resultAvatar,
-                            isSelected && styles.resultAvatarSelected,
-                          ]}
-                        >
-                          <Text style={styles.resultAvatarText}>
-                            {displayName.charAt(0).toUpperCase()}
-                          </Text>
-                        </View>
-
-                        <View style={styles.resultInfo}>
-                          <Text style={styles.resultName}>{displayName}</Text>
-
-                          <Text style={styles.usernameLabel}>
-                            @{user.username}
-                          </Text>
-                        </View>
-
-                        <View style={styles.selectionIndicator}>
-                          <Ionicons
-                            name={
-                              isSelected
-                                ? "checkmark-circle"
-                                : "ellipse-outline"
-                            }
-                            size={20}
-                            color={isSelected ? "#B6F36B" : "#666666"}
-                          />
-
-                          <Text
-                            style={[
-                              styles.selectLabel,
-                              isSelected && styles.selectedLabel,
-                            ]}
-                          >
-                            {isSelected ? "Selected" : "Select"}
-                          </Text>
-                        </View>
-                      </Pressable>
-                    );
-                  })}
-                </View>
-              )}
-
-              <Pressable
-                style={[styles.sendButton, sending && styles.disabledButton]}
-                onPress={() => void sendInvitation()}
-                disabled={sending}
-              >
-                {sending ? (
-                  <ActivityIndicator color="#101010" />
-                ) : (
-                  <>
-                    <Ionicons name="send-outline" size={17} color="#101010" />
-                    <Text style={styles.sendButtonText}>Send invitation</Text>
-                  </>
-                )}
-              </Pressable>
-
-              <Pressable
-                style={styles.cancelButton}
-                onPress={closeInviteModal}
-                disabled={sending}
-              >
-                <Text style={styles.cancelButtonText}>Cancel</Text>
-              </Pressable>
-            </View>
-          </SafeAreaView>
-        </KeyboardAvoidingView>
-      </Modal>
+                  <View style={styles.selectionIndicator}>
+                    <Ionicons
+                      name={
+                        isSelected
+                          ? "checkmark-circle"
+                          : "ellipse-outline"
+                      }
+                      size={20}
+                      color={isSelected ? "#B6F36B" : "#666666"}
+                    />
+                    <Text
+                      style={[
+                        styles.selectLabel,
+                        isSelected && styles.selectedLabel,
+                      ]}
+                    >
+                      {isSelected ? "Selected" : "Select"}
+                    </Text>
+                  </View>
+                </Pressable>
+              );
+            })}
+          </View>
+        )}
+      </AppModal>
     </SafeAreaView>
   );
 }
@@ -790,12 +778,10 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#101010",
   },
-
   content: {
     padding: 20,
     paddingBottom: 36,
   },
-
   center: {
     flex: 1,
     alignItems: "center",
@@ -803,7 +789,6 @@ const styles = StyleSheet.create({
     padding: 24,
     backgroundColor: "#101010",
   },
-
   emptyIcon: {
     width: 68,
     height: 68,
@@ -815,7 +800,6 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginBottom: 18,
   },
-
   hero: {
     alignItems: "center",
     backgroundColor: "#1A1A1A",
@@ -825,7 +809,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#303030",
   },
-
   groupIcon: {
     width: 72,
     height: 72,
@@ -837,14 +820,12 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginBottom: 16,
   },
-
   groupName: {
     fontSize: 24,
     fontWeight: "800",
     color: "#FFFFFF",
     textAlign: "center",
   },
-
   memberCountBadge: {
     flexDirection: "row",
     alignItems: "center",
@@ -855,51 +836,43 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     marginTop: 12,
   },
-
   memberCountText: {
     color: "#B6F36B",
     fontSize: 12,
     fontWeight: "700",
   },
-
   heroDescription: {
     color: "#888888",
     fontSize: 13,
     marginTop: 13,
   },
-
   heading: {
     fontSize: 22,
     fontWeight: "700",
     color: "#FFFFFF",
   },
-
   muted: {
     color: "#888888",
     fontSize: 14,
     marginTop: 8,
     textAlign: "center",
   },
-
   sectionHeader: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     marginBottom: 16,
   },
-
   sectionTitle: {
     fontSize: 19,
     fontWeight: "800",
     color: "#FFFFFF",
   },
-
   sectionSubtitle: {
     fontSize: 12,
     color: "#888888",
     marginTop: 4,
   },
-
   countBadge: {
     minWidth: 32,
     height: 32,
@@ -909,13 +882,11 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
-
   countText: {
     color: "#B6F36B",
     fontSize: 13,
     fontWeight: "800",
   },
-
   errorBanner: {
     flexDirection: "row",
     alignItems: "center",
@@ -927,14 +898,12 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     marginBottom: 14,
   },
-
   errorBannerText: {
     color: "#FFAAAA",
     fontSize: 12,
     flex: 1,
     lineHeight: 18,
   },
-
   memberCard: {
     backgroundColor: "#1A1A1A",
     borderRadius: 18,
@@ -943,17 +912,14 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#303030",
   },
-
   memberCardPressed: {
     opacity: 0.75,
     borderColor: "#718C4D",
   },
-
   memberTopRow: {
     flexDirection: "row",
     alignItems: "center",
   },
-
   avatar: {
     width: 46,
     height: 46,
@@ -965,29 +931,24 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginRight: 12,
   },
-
   avatarText: {
     fontSize: 18,
     fontWeight: "800",
     color: "#B6F36B",
   },
-
   memberInfo: {
     flex: 1,
   },
-
   memberName: {
     fontSize: 15,
     fontWeight: "700",
     color: "#FFFFFF",
   },
-
   usernameLabel: {
     fontSize: 12,
     color: "#888888",
     marginTop: 4,
   },
-
   roleBadge: {
     flexDirection: "row",
     alignItems: "center",
@@ -997,92 +958,77 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 9,
   },
-
   ownerBadge: {
     backgroundColor: "#252D20",
     borderWidth: 1,
     borderColor: "#46543A",
   },
-
   roleText: {
     fontSize: 11,
     fontWeight: "700",
     color: "#999999",
   },
-
   ownerText: {
     color: "#B6F36B",
   },
-
   memberProgress: {
     marginTop: 19,
   },
-
   calorieNumbers: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     marginBottom: 12,
   },
-
   caloriesConsumed: {
     color: "#FFFFFF",
     fontSize: 25,
     fontWeight: "800",
     letterSpacing: -0.6,
   },
-
   kcalLabel: {
     color: "#888888",
     fontSize: 12,
     fontWeight: "500",
   },
-
   calorieGoal: {
     color: "#888888",
     fontSize: 12,
     marginTop: 4,
   },
-
   percentageBadge: {
     backgroundColor: "#252D20",
     borderRadius: 10,
     paddingHorizontal: 10,
     paddingVertical: 7,
   },
-
   progressPercentage: {
     color: "#B6F36B",
     fontSize: 13,
     fontWeight: "800",
   },
-
   progressTrack: {
     height: 8,
     backgroundColor: "#303030",
     borderRadius: 8,
     overflow: "hidden",
   },
-
   progressFill: {
     height: "100%",
     backgroundColor: "#B6F36B",
     borderRadius: 8,
   },
-
   goalReachedRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
     marginTop: 10,
   },
-
   goalReached: {
     color: "#B6F36B",
     fontSize: 12,
     fontWeight: "700",
   },
-
   emptyCard: {
     padding: 26,
     borderRadius: 18,
@@ -1091,14 +1037,12 @@ const styles = StyleSheet.create({
     borderColor: "#303030",
     alignItems: "center",
   },
-
   emptyTitle: {
     color: "#FFFFFF",
     fontSize: 16,
     fontWeight: "700",
     marginTop: 14,
   },
-
   emptyDescription: {
     color: "#888888",
     fontSize: 13,
@@ -1106,7 +1050,6 @@ const styles = StyleSheet.create({
     lineHeight: 19,
     marginTop: 7,
   },
-
   historyHintRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -1117,13 +1060,11 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: "#303030",
   },
-
   historyHint: {
     color: "#B6F36B",
     fontSize: 12,
     fontWeight: "700",
   },
-
   inviteButton: {
     flexDirection: "row",
     alignItems: "center",
@@ -1134,17 +1075,14 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     marginTop: 13,
   },
-
   inviteButtonPressed: {
     opacity: 0.8,
   },
-
   inviteButtonText: {
     color: "#101010",
     fontSize: 15,
     fontWeight: "800",
   },
-
   privacyNote: {
     flexDirection: "row",
     alignItems: "flex-start",
@@ -1153,7 +1091,6 @@ const styles = StyleSheet.create({
     marginTop: 20,
     paddingHorizontal: 10,
   },
-
   footer: {
     flex: 1,
     textAlign: "center",
@@ -1161,7 +1098,6 @@ const styles = StyleSheet.create({
     lineHeight: 17,
     color: "#777777",
   },
-
   primaryButton: {
     backgroundColor: "#B6F36B",
     paddingHorizontal: 24,
@@ -1169,54 +1105,16 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     marginTop: 22,
   },
-
   primaryButtonText: {
     color: "#101010",
     fontWeight: "800",
     fontSize: 14,
   },
 
-  // Invite modal
-  modalOverlay: {
-    flex: 1,
-    justifyContent: "flex-end",
+  // Invite modal styles
+  inviteModalFooter: {
+    gap: 8,
   },
-
-  modalBackdrop: {
-    ...StyleSheet.absoluteFill,
-    backgroundColor: "rgba(0, 0, 0, 0.72)",
-  },
-
-  modalSafeArea: {
-    backgroundColor: "#1A1A1A",
-    borderTopLeftRadius: 26,
-    borderTopRightRadius: 26,
-    overflow: "hidden",
-  },
-
-  modalContent: {
-    backgroundColor: "#1A1A1A",
-    paddingHorizontal: 22,
-    paddingTop: 12,
-    paddingBottom: 12,
-    maxHeight: "90%",
-  },
-
-  modalHandle: {
-    width: 42,
-    height: 5,
-    borderRadius: 3,
-    backgroundColor: "#484848",
-    alignSelf: "center",
-    marginBottom: 20,
-  },
-
-  modalHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-
   modalIcon: {
     width: 48,
     height: 48,
@@ -1226,32 +1124,8 @@ const styles = StyleSheet.create({
     borderColor: "#46543A",
     alignItems: "center",
     justifyContent: "center",
+    marginBottom: 18,
   },
-
-  closeButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 12,
-    backgroundColor: "#252525",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-
-  modalTitle: {
-    color: "#FFFFFF",
-    fontSize: 23,
-    fontWeight: "800",
-    marginTop: 18,
-  },
-
-  modalDescription: {
-    color: "#999999",
-    fontSize: 13,
-    lineHeight: 20,
-    marginTop: 7,
-    marginBottom: 23,
-  },
-
   inputLabel: {
     color: "#AAAAAA",
     fontSize: 11,
@@ -1259,7 +1133,6 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
     marginBottom: 9,
   },
-
   inputContainer: {
     height: 53,
     flexDirection: "row",
@@ -1271,32 +1144,27 @@ const styles = StyleSheet.create({
     borderRadius: 13,
     backgroundColor: "#101010",
   },
-
   input: {
     flex: 1,
     height: "100%",
     fontSize: 14,
     color: "#FFFFFF",
   },
-
   searchStatusText: {
     color: "#999999",
     fontSize: 12,
     marginTop: 12,
     lineHeight: 18,
   },
-
   errorText: {
     color: "#FF8A8A",
     fontSize: 12,
     marginTop: 10,
     lineHeight: 18,
   },
-
   resultsContainer: {
     marginTop: 19,
   },
-
   resultsTitle: {
     color: "#999999",
     fontSize: 10,
@@ -1304,7 +1172,6 @@ const styles = StyleSheet.create({
     letterSpacing: 1,
     marginBottom: 8,
   },
-
   resultRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -1312,7 +1179,6 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: "#383838",
   },
-
   resultAvatar: {
     width: 40,
     height: 40,
@@ -1322,29 +1188,24 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginRight: 11,
   },
-
   resultAvatarText: {
     color: "#B6F36B",
     fontWeight: "800",
     fontSize: 15,
   },
-
   resultInfo: {
     flex: 1,
   },
-
   resultName: {
     color: "#FFFFFF",
     fontSize: 14,
     fontWeight: "700",
   },
-
   selectLabel: {
     color: "#B6F36B",
     fontSize: 12,
     fontWeight: "700",
   },
-
   sendButton: {
     flexDirection: "row",
     alignItems: "center",
@@ -1353,32 +1214,25 @@ const styles = StyleSheet.create({
     backgroundColor: "#B6F36B",
     padding: 15,
     borderRadius: 13,
-    marginTop: 22,
   },
-
   sendButtonText: {
     color: "#101010",
     fontSize: 14,
     fontWeight: "800",
   },
-
   disabledButton: {
     opacity: 0.6,
   },
-
   cancelButton: {
     height: 45,
     alignItems: "center",
     justifyContent: "center",
-    marginTop: 5,
   },
-
   cancelButtonText: {
     color: "#999999",
     fontSize: 13,
     fontWeight: "700",
   },
-
   resultRowSelected: {
     backgroundColor: "#252D20",
     borderWidth: 1,
@@ -1387,21 +1241,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     marginBottom: 8,
   },
-
   resultRowPressed: {
     opacity: 0.75,
   },
-
   resultAvatarSelected: {
     backgroundColor: "#34452A",
   },
-
   selectionIndicator: {
     flexDirection: "row",
     alignItems: "center",
     gap: 5,
   },
-
   selectedLabel: {
     color: "#B6F36B",
   },

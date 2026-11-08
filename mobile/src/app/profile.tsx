@@ -1,7 +1,6 @@
-import React, { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -11,10 +10,11 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { useRouter } from "expo-router";
+import { router } from "expo-router";
 import { supabase } from "../lib/supabase";
 import { usePostHog } from "posthog-react-native";
 import { Sentry } from "../lib/sentry";
+import { useAppDialog } from "../contexts/AppDialogContext";
 
 type Gender = "male" | "female" | "other" | "prefer_not_to_say";
 type Goal = "lose" | "maintain" | "gain";
@@ -66,8 +66,7 @@ const goalOptions: { label: string; value: Goal }[] = [
 
 export default function ProfileScreen() {
   const posthog = usePostHog();
-  const router = useRouter();
-
+  const { showDialog } = useAppDialog();
   const [profile, setProfile] = useState<ProfileData>(initialProfile);
   const [dailyCalories, setDailyCalories] = useState("");
   const [savedCalories, setSavedCalories] = useState<number | null>(null);
@@ -137,18 +136,28 @@ export default function ProfileScreen() {
         setSavedCalories(calories);
         setDailyCalories(String(calories));
       }
-    } catch (error: any) {
-      Alert.alert(
+    } catch (error) {
+      Sentry.logger.error("Profile failed to load", {
+        operation: "load_profile",
+      });
+      Sentry.captureException(error);
+      posthog.capture("profile_load_failed");
+
+      showDialog(
         "Unable to load profile",
-        error?.message ?? "Something went wrong while loading your profile.",
+        error instanceof Error
+          ? error.message
+          : "Something went wrong while loading your profile.",
+        [{ text: "OK" }],
+        { type: "error" },
       );
     } finally {
       setLoading(false);
     }
-  }, [router]);
+  }, [posthog, showDialog]);
 
   useEffect(() => {
-    loadProfile();
+    void loadProfile();
   }, [loadProfile]);
 
   const updateField = <K extends keyof ProfileData>(
@@ -165,9 +174,11 @@ export default function ProfileScreen() {
     const username = profile.username.trim().toLowerCase();
 
     if (!/^[a-z0-9_]{3,24}$/.test(username)) {
-      Alert.alert(
+      showDialog(
         "Invalid username",
         "Use 3–24 characters: lowercase letters, numbers, and underscores only.",
+        [{ text: "OK" }],
+        { type: "warning" },
       );
       return false;
     }
@@ -176,9 +187,11 @@ export default function ProfileScreen() {
       const datePattern = /^\d{4}-\d{2}-\d{2}$/;
 
       if (!datePattern.test(profile.birth_date.trim())) {
-        Alert.alert(
+        showDialog(
           "Invalid birth date",
           "Enter your birth date in YYYY-MM-DD format, for example 2002-08-15.",
+          [{ text: "OK" }],
+          { type: "warning" },
         );
         return false;
       }
@@ -189,9 +202,11 @@ export default function ProfileScreen() {
         Number.isNaN(date.getTime()) ||
         date.toISOString().slice(0, 10) !== profile.birth_date.trim()
       ) {
-        Alert.alert(
+        showDialog(
           "Invalid birth date",
           "Please enter a valid calendar date.",
+          [{ text: "OK" }],
+          { type: "warning" },
         );
         return false;
       }
@@ -201,9 +216,11 @@ export default function ProfileScreen() {
       const height = Number(profile.height_cm);
 
       if (!Number.isFinite(height) || height <= 0 || height > 300) {
-        Alert.alert(
+        showDialog(
           "Invalid height",
           "Enter a height greater than 0 and no more than 300 cm.",
+          [{ text: "OK" }],
+          { type: "warning" },
         );
         return false;
       }
@@ -213,9 +230,11 @@ export default function ProfileScreen() {
       const weight = Number(profile.weight_kg);
 
       if (!Number.isFinite(weight) || weight <= 0 || weight > 700) {
-        Alert.alert(
+        showDialog(
           "Invalid weight",
           "Enter a weight greater than 0 and no more than 700 kg.",
+          [{ text: "OK" }],
+          { type: "warning" },
         );
         return false;
       }
@@ -225,7 +244,12 @@ export default function ProfileScreen() {
       profile.gender &&
       !genderOptions.some((option) => option.value === profile.gender)
     ) {
-      Alert.alert("Invalid gender", "Please select a valid option.");
+      showDialog(
+        "Invalid gender",
+        "Please select a valid option.",
+        [{ text: "OK" }],
+        { type: "warning" },
+      );
       return false;
     }
 
@@ -233,7 +257,12 @@ export default function ProfileScreen() {
       profile.goal &&
       !goalOptions.some((option) => option.value === profile.goal)
     ) {
-      Alert.alert("Invalid goal", "Please select a valid goal.");
+      showDialog(
+        "Invalid goal",
+        "Please select a valid goal.",
+        [{ text: "OK" }],
+        { type: "warning" },
+      );
       return false;
     }
 
@@ -241,7 +270,7 @@ export default function ProfileScreen() {
   };
 
   const saveProfile = async () => {
-    if (!userId || !validateProfile()) return;
+    if (savingProfile || !userId || !validateProfile()) return;
 
     setSavingProfile(true);
 
@@ -273,20 +302,50 @@ export default function ProfileScreen() {
         birth_date: current.birth_date.trim(),
       }));
 
-      Alert.alert("Profile updated", "Your changes have been saved.");
-    } catch (error: any) {
-      const message = error?.message ?? "Unable to save your profile.";
+      Sentry.logger.info("Profile updated successfully", {
+        operation: "update_profile",
+      });
+      posthog.capture("profile_updated");
+
+      showDialog(
+        "Profile updated",
+        "Your changes have been saved.",
+        [{ text: "Done" }],
+        { type: "success" },
+      );
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Unable to save your profile.";
+
+      Sentry.logger.error("Profile update failed", {
+        operation: "update_profile",
+      });
+      Sentry.captureException(error);
+      posthog.capture("profile_update_failed", {
+        reason:
+          message.toLowerCase().includes("duplicate") ||
+          message.toLowerCase().includes("unique")
+            ? "username_unavailable"
+            : "database_update",
+      });
 
       if (
         message.toLowerCase().includes("duplicate") ||
         message.toLowerCase().includes("unique")
       ) {
-        Alert.alert(
+        showDialog(
           "Username unavailable",
           "That username is already taken. Please choose another one.",
+          [{ text: "OK" }],
+          { type: "warning" },
         );
       } else {
-        Alert.alert("Could not save profile", message);
+        showDialog(
+          "Could not save profile",
+          message,
+          [{ text: "OK" }],
+          { type: "error" },
+        );
       }
     } finally {
       setSavingProfile(false);
@@ -294,7 +353,7 @@ export default function ProfileScreen() {
   };
 
   const saveCalorieGoal = async () => {
-    if (!userId) return;
+    if (savingCalories || !userId) return;
 
     const calories = Number(dailyCalories.trim());
 
@@ -304,17 +363,21 @@ export default function ProfileScreen() {
       calories < 500 ||
       calories > 10000
     ) {
-      Alert.alert(
+      showDialog(
         "Invalid calorie goal",
         "Enter a whole number between 500 and 10,000 calories.",
+        [{ text: "OK" }],
+        { type: "warning" },
       );
       return;
     }
 
     if (calories === savedCalories) {
-      Alert.alert(
+      showDialog(
         "No changes",
         "Your daily calorie goal is already set to this value.",
+        [{ text: "OK" }],
+        { type: "info" },
       );
       return;
     }
@@ -341,11 +404,13 @@ export default function ProfileScreen() {
         source: "profile",
       });
 
-      Alert.alert(
+      showDialog(
         "Calorie goal updated",
         `Your daily target is now ${calories.toLocaleString()} calories.`,
+        [{ text: "Done" }],
+        { type: "success" },
       );
-    } catch (error: any) {
+    } catch (error) {
       Sentry.logger.error("Calorie goal update failed", {
         operation: "update_calorie_goal",
       });
@@ -356,57 +421,73 @@ export default function ProfileScreen() {
         failure_stage: "database_insert",
       });
 
-      Alert.alert(
+      showDialog(
         "Could not update calorie goal",
-        error?.message ?? "Something went wrong while saving your goal.",
+        error instanceof Error
+          ? error.message
+          : "Something went wrong while saving your goal.",
+        [{ text: "OK" }],
+        { type: "error" },
       );
     } finally {
       setSavingCalories(false);
     }
   };
 
+  const performLogout = async () => {
+    setLoggingOut(true);
+    posthog.capture("logout_started");
+
+    try {
+      const { error } = await supabase.auth.signOut();
+
+      if (error) throw error;
+
+      Sentry.logger.info("Logout completed", {
+        operation: "logout",
+      });
+
+      posthog.capture("logout_completed");
+      router.replace("/login");
+    } catch (error) {
+      Sentry.logger.error("Logout failed", {
+        operation: "logout",
+      });
+
+      Sentry.captureException(error);
+      posthog.capture("logout_failed");
+
+      showDialog(
+        "Logout failed",
+        error instanceof Error
+          ? error.message
+          : "Unable to log out. Please try again.",
+        [{ text: "OK" }],
+        { type: "error" },
+      );
+    } finally {
+      setLoggingOut(false);
+    }
+  };
+
   const logout = () => {
-    Alert.alert("Log out", "Are you sure you want to log out?", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Log out",
-        style: "destructive",
-        onPress: async () => {
-          setLoggingOut(true);
+    if (loggingOut) return;
 
-          posthog.capture("logout_started");
-
-          try {
-            const { error } = await supabase.auth.signOut();
-
-            if (error) throw error;
-
-            Sentry.logger.info("Logout completed", {
-              operation: "logout",
-            });
-
-            posthog.capture("logout_completed");
-
-            router.replace("/login");
-          } catch (error: any) {
-            Sentry.logger.error("Logout failed", {
-              operation: "logout",
-            });
-
-            Sentry.captureException(error);
-
-            posthog.capture("logout_failed");
-
-            Alert.alert(
-              "Logout failed",
-              error?.message ?? "Unable to log out. Please try again.",
-            );
-          } finally {
-            setLoggingOut(false);
-          }
+    showDialog(
+      "Log out?",
+      "Are you sure you want to log out of BiteLog?",
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Log out",
+          style: "destructive",
+          onPress: () => {
+            void performLogout();
+          },
         },
-      },
-    ]);
+      ],
+      { type: "confirmation" },
+    );
   };
 
   const displayName =
@@ -426,12 +507,14 @@ export default function ProfileScreen() {
   return (
     <KeyboardAvoidingView
       style={styles.screen}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      keyboardVerticalOffset={Platform.OS === "ios" ? 0 : 0}
     >
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
         showsVerticalScrollIndicator={false}
       >
         {/* Header */}
@@ -512,6 +595,8 @@ export default function ProfileScreen() {
               keyboardType="number-pad"
               maxLength={5}
               returnKeyType="done"
+              editable={!savingCalories}
+              onSubmitEditing={() => void saveCalorieGoal()}
             />
             <Text style={styles.calorieInputUnit}>kcal / day</Text>
           </View>
@@ -554,6 +639,8 @@ export default function ProfileScreen() {
             autoCapitalize="none"
             autoCorrect={false}
             maxLength={24}
+            editable={!savingProfile}
+            returnKeyType="next"
           />
           <Text style={styles.fieldHint}>
             3–24 characters. Letters, numbers, and underscores.
@@ -568,6 +655,8 @@ export default function ProfileScreen() {
             placeholderTextColor={COLORS.muted}
             autoCapitalize="words"
             maxLength={60}
+            editable={!savingProfile}
+            returnKeyType="next"
           />
 
           <Text style={styles.fieldLabel}>Date of birth</Text>
@@ -579,6 +668,8 @@ export default function ProfileScreen() {
             placeholderTextColor={COLORS.muted}
             keyboardType="numbers-and-punctuation"
             maxLength={10}
+            editable={!savingProfile}
+            returnKeyType="next"
           />
           <Text style={styles.fieldHint}>
             Optional. Use year-month-day format.
@@ -599,6 +690,7 @@ export default function ProfileScreen() {
                     styles.optionChip,
                     selected && styles.optionChipSelected,
                   ]}
+                  disabled={savingProfile}
                 >
                   <Text
                     style={[
@@ -625,6 +717,7 @@ export default function ProfileScreen() {
                   placeholderTextColor={COLORS.muted}
                   keyboardType="decimal-pad"
                   maxLength={6}
+                  editable={!savingProfile}
                 />
                 <Text style={styles.unitLabel}>cm</Text>
               </View>
@@ -641,6 +734,7 @@ export default function ProfileScreen() {
                   placeholderTextColor={COLORS.muted}
                   keyboardType="decimal-pad"
                   maxLength={6}
+                  editable={!savingProfile}
                 />
                 <Text style={styles.unitLabel}>kg</Text>
               </View>
@@ -662,6 +756,7 @@ export default function ProfileScreen() {
                     styles.goalOption,
                     selected && styles.goalOptionSelected,
                   ]}
+                  disabled={savingProfile}
                 >
                   <View
                     style={[
@@ -716,7 +811,7 @@ export default function ProfileScreen() {
           <View style={styles.accountInfo}>
             <Text style={styles.accountTitle}>Sign out</Text>
             <Text style={styles.accountSubtitle}>
-              Sign out of your fun tracker account on this device.
+              Sign out of your BiteLog account on this device.
             </Text>
           </View>
 
@@ -738,7 +833,7 @@ export default function ProfileScreen() {
         </View>
 
         <Text style={styles.footerText}>
-          FUN TRACKER · YOUR JOURNEY, YOUR PACE
+          BITELOG · YOUR JOURNEY, YOUR PACE
         </Text>
       </ScrollView>
     </KeyboardAvoidingView>
@@ -756,7 +851,7 @@ const styles = StyleSheet.create({
   content: {
     paddingHorizontal: 20,
     paddingTop: 24,
-    paddingBottom: 40,
+    paddingBottom: 48,
   },
 
   loadingContainer: {

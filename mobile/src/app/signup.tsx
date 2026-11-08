@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
+import type { ComponentRef } from "react";
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -18,6 +18,7 @@ import BiteLogMark from "../components/BiteLogoMark";
 import { supabase } from "../lib/supabase";
 import { usePostHog } from "posthog-react-native";
 import { Sentry } from "../lib/sentry";
+import { useAppDialog } from "../contexts/AppDialogContext";
 
 const C = {
   background: "#101010",
@@ -32,6 +33,11 @@ const C = {
 
 export default function SignupScreen() {
   const posthog = usePostHog();
+  const { showDialog } = useAppDialog();
+
+  const usernameInputRef = useRef<ComponentRef<typeof TextInput>>(null);
+  const passwordInputRef = useRef<ComponentRef<typeof TextInput>>(null);
+  const confirmPasswordInputRef = useRef<ComponentRef<typeof TextInput>>(null);
 
   const [email, setEmail] = useState("");
   const [username, setUsername] = useState("");
@@ -46,33 +52,46 @@ export default function SignupScreen() {
     const cleanUsername = username.trim().toLowerCase();
 
     if (!cleanEmail || !cleanUsername || !password || !confirmPassword) {
-      Alert.alert("Missing information", "Please fill in all fields.");
+      showDialog(
+        "Missing information",
+        "Please fill in all fields.",
+        [{ text: "OK" }],
+        { type: "warning" },
+      );
       return;
     }
 
     if (cleanUsername.length < 3) {
-      Alert.alert(
+      showDialog(
         "Invalid username",
         "Username must be at least 3 characters.",
+        [{ text: "OK" }],
+        { type: "warning" },
       );
       return;
     }
 
     if (password.length < 6) {
-      Alert.alert(
+      showDialog(
         "Invalid password",
         "Password must be at least 6 characters.",
+        [{ text: "OK" }],
+        { type: "warning" },
       );
       return;
     }
 
     if (password !== confirmPassword) {
-      Alert.alert(
+      showDialog(
         "Passwords do not match",
         "Please make sure both passwords are the same.",
+        [{ text: "OK" }],
+        { type: "warning" },
       );
       return;
     }
+
+    if (loading) return;
 
     setLoading(true);
 
@@ -91,6 +110,7 @@ export default function SignupScreen() {
         Sentry.logger.error("Signup failed", {
           operation: "signup",
           method: "email",
+          failure_stage: "supabase_signup",
         });
 
         Sentry.captureException(error);
@@ -100,13 +120,19 @@ export default function SignupScreen() {
           failure_stage: "supabase_signup",
         });
 
-        Alert.alert("Signup failed", error.message);
+        showDialog(
+          "Signup failed",
+          error.message,
+          [{ text: "OK" }],
+          { type: "error" },
+        );
         return;
       }
 
       if (!data.user) {
         Sentry.logger.warn("Signup returned no user", {
           operation: "signup",
+          reason: "missing_user",
         });
 
         posthog.capture("signup_failed", {
@@ -114,7 +140,12 @@ export default function SignupScreen() {
           failure_stage: "missing_user",
         });
 
-        Alert.alert("Signup failed", "The account could not be created.");
+        showDialog(
+          "Signup failed",
+          "The account could not be created. Please try again.",
+          [{ text: "OK" }],
+          { type: "error" },
+        );
         return;
       }
 
@@ -127,16 +158,22 @@ export default function SignupScreen() {
         method: "email",
       });
 
-      Alert.alert("Account created", `Welcome, ${cleanUsername}!`, [
-        {
-          text: "Continue",
-          onPress: () => router.replace("/"),
-        },
-      ]);
+      showDialog(
+        "Account created",
+        `Welcome, ${cleanUsername}!`,
+        [
+          {
+            text: "Continue",
+            onPress: () => router.replace("/"),
+          },
+        ],
+        { type: "success", cancelable: false },
+      );
     } catch (error) {
       Sentry.logger.error("Unexpected signup error", {
         operation: "signup",
         method: "email",
+        failure_stage: "unexpected_error",
       });
 
       Sentry.captureException(error);
@@ -146,7 +183,12 @@ export default function SignupScreen() {
         failure_stage: "unexpected_error",
       });
 
-      Alert.alert("Something went wrong", "Please try again.");
+      showDialog(
+        "Something went wrong",
+        "We couldn't create your account. Please try again.",
+        [{ text: "OK" }],
+        { type: "error" },
+      );
     } finally {
       setLoading(false);
     }
@@ -155,11 +197,13 @@ export default function SignupScreen() {
   return (
     <KeyboardAvoidingView
       style={styles.container}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      keyboardVerticalOffset={0}
     >
       <ScrollView
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
         showsVerticalScrollIndicator={false}
       >
         {/* Brand */}
@@ -177,10 +221,12 @@ export default function SignupScreen() {
         <View style={styles.header}>
           <Text style={styles.eyebrow}>YOUR JOURNEY STARTS HERE</Text>
 
-          <Text style={styles.title}>Create your{"\n"}account.</Text>
+          <Text style={styles.title}>
+            Create your{"\n"}account.
+          </Text>
 
           <Text style={styles.subtitle}>
-            Join funTracker and take control of your daily nutrition, one meal
+            Join BiteLog and take control of your daily nutrition, one meal
             at a time.
           </Text>
         </View>
@@ -201,7 +247,12 @@ export default function SignupScreen() {
               autoCapitalize="none"
               autoCorrect={false}
               keyboardType="email-address"
+              textContentType="emailAddress"
+              autoComplete="email"
               editable={!loading}
+              returnKeyType="next"
+              onSubmitEditing={() => usernameInputRef.current?.focus()}
+              blurOnSubmit={false}
             />
           </View>
 
@@ -212,6 +263,7 @@ export default function SignupScreen() {
             <Ionicons name="at-outline" size={19} color={C.muted} />
 
             <TextInput
+              ref={usernameInputRef}
               style={styles.input}
               placeholder="Choose a username"
               placeholderTextColor={C.muted}
@@ -219,7 +271,12 @@ export default function SignupScreen() {
               onChangeText={setUsername}
               autoCapitalize="none"
               autoCorrect={false}
+              textContentType="username"
+              autoComplete="username-new"
               editable={!loading}
+              returnKeyType="next"
+              onSubmitEditing={() => passwordInputRef.current?.focus()}
+              blurOnSubmit={false}
             />
           </View>
 
@@ -238,6 +295,7 @@ export default function SignupScreen() {
             <Ionicons name="lock-closed-outline" size={19} color={C.muted} />
 
             <TextInput
+              ref={passwordInputRef}
               style={styles.input}
               placeholder="Create a password"
               placeholderTextColor={C.muted}
@@ -246,13 +304,20 @@ export default function SignupScreen() {
               secureTextEntry={!passwordVisible}
               autoCapitalize="none"
               autoCorrect={false}
+              textContentType="newPassword"
+              autoComplete="new-password"
               editable={!loading}
+              returnKeyType="next"
+              onSubmitEditing={() => confirmPasswordInputRef.current?.focus()}
+              blurOnSubmit={false}
             />
 
             <Pressable
-              onPress={() => setPasswordVisible(!passwordVisible)}
+              onPress={() => setPasswordVisible((visible) => !visible)}
               disabled={loading}
               hitSlop={10}
+              accessibilityRole="button"
+              accessibilityLabel={passwordVisible ? "Hide password" : "Show password"}
             >
               <Ionicons
                 name={passwordVisible ? "eye-off-outline" : "eye-outline"}
@@ -275,6 +340,7 @@ export default function SignupScreen() {
             />
 
             <TextInput
+              ref={confirmPasswordInputRef}
               style={styles.input}
               placeholder="Enter password again"
               placeholderTextColor={C.muted}
@@ -283,15 +349,23 @@ export default function SignupScreen() {
               secureTextEntry={!confirmPasswordVisible}
               autoCapitalize="none"
               autoCorrect={false}
+              textContentType="newPassword"
+              autoComplete="new-password"
               editable={!loading}
               onSubmitEditing={handleSignup}
               returnKeyType="done"
             />
 
             <Pressable
-              onPress={() => setConfirmPasswordVisible(!confirmPasswordVisible)}
+              onPress={() =>
+                setConfirmPasswordVisible((visible) => !visible)
+              }
               disabled={loading}
               hitSlop={10}
+              accessibilityRole="button"
+              accessibilityLabel={
+                confirmPasswordVisible ? "Hide password" : "Show password"
+              }
             >
               <Ionicons
                 name={

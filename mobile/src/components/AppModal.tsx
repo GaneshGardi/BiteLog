@@ -1,17 +1,18 @@
 
-import React, { ReactNode } from 'react';
+import type { ReactNode } from "react";
 import {
-  Modal,
-  View,
-  Text,
-  Pressable,
-  StyleSheet,
+  ActivityIndicator,
   KeyboardAvoidingView,
+  Modal,
   Platform,
+  Pressable,
   ScrollView,
-} from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import { SafeAreaView } from 'react-native-safe-area-context';
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
+import { Ionicons } from "@expo/vector-icons";
+import { SafeAreaView } from "react-native-safe-area-context";
 
 type AppModalProps = {
   visible: boolean;
@@ -21,6 +22,18 @@ type AppModalProps = {
   children: ReactNode;
   footer?: ReactNode;
   closeOnBackdropPress?: boolean;
+  showCloseButton?: boolean;
+  presentation?: "center" | "bottom";
+  loading?: boolean;
+};
+
+const C = {
+  background: "#101010",
+  card: "#1A1A1A",
+  text: "#FFFFFF",
+  secondary: "#999999",
+  muted: "#707070",
+  border: "#303030",
 };
 
 export default function AppModal({
@@ -31,131 +44,222 @@ export default function AppModal({
   children,
   footer,
   closeOnBackdropPress = true,
+  showCloseButton = true,
+  presentation = "center",
+  loading = false,
 }: AppModalProps) {
+  const isBottomSheet = presentation === "bottom";
+
+  const handleClose = () => {
+    if (!loading) {
+      onClose();
+    }
+  };
+
   return (
     <Modal
       visible={visible}
       transparent
-      animationType="fade"
+      animationType={isBottomSheet ? "slide" : "fade"}
       statusBarTranslucent
-      onRequestClose={onClose}
+      onRequestClose={handleClose}
     >
-      <SafeAreaView style={styles.overlay} edges={['top', 'bottom']}>
-        <Pressable
-          style={StyleSheet.absoluteFill}
-          onPress={closeOnBackdropPress ? onClose : undefined}
-        />
-
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          style={styles.keyboardContainer}
+      <SafeAreaView
+        style={styles.safeArea}
+        edges={["top", "bottom"]}
+      >
+        <View
+          style={[
+            styles.overlay,
+            isBottomSheet
+              ? styles.bottomOverlay
+              : styles.centerOverlay,
+          ]}
         >
-          <View style={styles.modalContainer}>
-            {/* Header */}
-            <View style={styles.header}>
-              <View style={styles.headerText}>
-                <Text style={styles.title}>{title}</Text>
+          {/* Backdrop */}
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={
+              closeOnBackdropPress && !loading
+                ? onClose
+                : undefined
+            }
+            accessible={false}
+          />
 
-                {subtitle ? (
-                  <Text style={styles.subtitle}>{subtitle}</Text>
-                ) : null}
-              </View>
-
-              <Pressable
-                onPress={onClose}
-                style={styles.closeButton}
-                hitSlop={8}
-              >
-                <Ionicons name="close" size={20} color="#FFFFFF" />
-              </Pressable>
-            </View>
-
-            {/* Content */}
-            <ScrollView
-              style={styles.content}
-              contentContainerStyle={styles.contentContainer}
-              keyboardShouldPersistTaps="handled"
-              showsVerticalScrollIndicator={false}
+          {/* Keyboard-aware modal container */}
+          <KeyboardAvoidingView
+            style={[
+              styles.keyboardContainer,
+              isBottomSheet
+                ? styles.bottomKeyboardContainer
+                : styles.centerKeyboardContainer,
+            ]}
+            behavior={Platform.OS === "ios" ? "padding" : "height"}
+            keyboardVerticalOffset={0}
+          >
+            <View
+              style={[
+                styles.modalContainer,
+                isBottomSheet && styles.bottomModalContainer,
+              ]}
             >
-              {children}
-            </ScrollView>
+              {/* Header */}
+              <View style={styles.header}>
+                <View style={styles.headerText}>
+                  <Text style={styles.title}>{title}</Text>
 
-            {/* Optional Footer */}
-            {footer ? (
-              <View style={styles.footer}>
-                {footer}
+                  {subtitle ? (
+                    <Text style={styles.subtitle}>
+                      {subtitle}
+                    </Text>
+                  ) : null}
+                </View>
+
+                {showCloseButton && (
+                  <Pressable
+                    onPress={handleClose}
+                    style={styles.closeButton}
+                    hitSlop={10}
+                    disabled={loading}
+                    accessibilityRole="button"
+                    accessibilityLabel="Close modal"
+                  >
+                    <Ionicons
+                      name="close"
+                      size={20}
+                      color={C.text}
+                    />
+                  </Pressable>
+                )}
               </View>
-            ) : null}
-          </View>
-        </KeyboardAvoidingView>
+
+              {/* Scrollable content */}
+              <ScrollView
+                style={styles.content}
+                contentContainerStyle={styles.contentContainer}
+                keyboardShouldPersistTaps="handled"
+                keyboardDismissMode={
+                  Platform.OS === "ios" ? "interactive" : "on-drag"
+                }
+                showsVerticalScrollIndicator={false}
+                nestedScrollEnabled
+              >
+                {children}
+              </ScrollView>
+
+              {/* Optional footer */}
+              {footer ? (
+                <View style={styles.footer}>
+                  {footer}
+                </View>
+              ) : null}
+            </View>
+          </KeyboardAvoidingView>
+        </View>
       </SafeAreaView>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: "transparent",
+  },
+
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.72)',
-    justifyContent: 'center',
+    backgroundColor: "rgba(0, 0, 0, 0.72)",
+  },
+
+  centerOverlay: {
+    justifyContent: "center",
     paddingHorizontal: 20,
   },
-  keyboardContainer: {
-    width: '100%',
-    maxHeight: '90%',
-    justifyContent: 'center',
+
+  bottomOverlay: {
+    justifyContent: "flex-end",
   },
+
+  keyboardContainer: {
+    width: "100%",
+  },
+
+  centerKeyboardContainer: {
+    maxHeight: "90%",
+    justifyContent: "center",
+  },
+
+  bottomKeyboardContainer: {
+    maxHeight: "92%",
+    justifyContent: "flex-end",
+  },
+
   modalContainer: {
-    backgroundColor: '#1A1A1A',
+    backgroundColor: C.card,
     borderRadius: 24,
     borderWidth: 1,
-    borderColor: '#303030',
-    overflow: 'hidden',
-    maxHeight: '100%',
+    borderColor: C.border,
+    overflow: "hidden",
+    maxHeight: "100%",
   },
+
+  bottomModalContainer: {
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
+  },
+
   header: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
     paddingHorizontal: 22,
     paddingTop: 22,
     paddingBottom: 16,
   },
+
   headerText: {
     flex: 1,
     paddingRight: 12,
   },
+
   title: {
-    color: '#FFFFFF',
+    color: C.text,
     fontSize: 20,
-    fontWeight: '700',
+    fontWeight: "800",
   },
+
   subtitle: {
-    color: '#888888',
+    color: C.secondary,
     fontSize: 13,
     lineHeight: 19,
     marginTop: 6,
   },
+
   closeButton: {
-    width: 34,
-    height: 34,
+    width: 36,
+    height: 36,
     borderRadius: 12,
-    backgroundColor: '#292929',
-    alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: "#292929",
+    alignItems: "center",
+    justifyContent: "center",
   },
+
   content: {
     flexShrink: 1,
   },
+
   contentContainer: {
     paddingHorizontal: 22,
     paddingBottom: 20,
   },
+
   footer: {
     paddingHorizontal: 22,
     paddingTop: 14,
     paddingBottom: 20,
     borderTopWidth: 1,
-    borderTopColor: '#303030',
+    borderTopColor: C.border,
   },
 });

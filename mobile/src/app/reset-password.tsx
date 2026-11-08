@@ -1,8 +1,6 @@
-
 import { useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -18,6 +16,7 @@ import { usePostHog } from "posthog-react-native";
 
 import { supabase } from "../lib/supabase";
 import { Sentry } from "../lib/sentry";
+import { useAppDialog } from "../contexts/AppDialogContext";
 
 const C = {
   background: "#101010",
@@ -40,6 +39,7 @@ type RecoveryAttempt = {
 export default function ResetPasswordScreen() {
   const params = useLocalSearchParams<{ code?: string | string[] }>();
   const posthog = usePostHog();
+  const { showDialog } = useAppDialog();
 
   const code = Array.isArray(params.code) ? params.code[0] : params.code;
 
@@ -49,7 +49,6 @@ export default function ResetPasswordScreen() {
 
   const [recoveryStatus, setRecoveryStatus] =
     useState<RecoveryStatus>("loading");
-
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [passwordVisible, setPasswordVisible] = useState(false);
@@ -84,7 +83,6 @@ export default function ResetPasswordScreen() {
     }
 
     let recoveryPromise: Promise<void>;
-
     const existingAttempt = recoveryAttemptRef.current;
 
     if (existingAttempt?.code === code) {
@@ -157,7 +155,6 @@ export default function ResetPasswordScreen() {
       });
 
       Sentry.captureException(error);
-
       posthog.capture("password_reset_signout_failed");
     } finally {
       router.replace("/login");
@@ -166,20 +163,26 @@ export default function ResetPasswordScreen() {
 
   const handleUpdatePassword = async () => {
     if (password.length < 8) {
-      Alert.alert(
+      showDialog(
         "Password too short",
         "Your new password must contain at least 8 characters.",
+        [{ text: "OK" }],
+        { type: "warning" },
       );
       return;
     }
 
     if (password !== confirmPassword) {
-      Alert.alert(
+      showDialog(
         "Passwords don't match",
         "Please enter the same password in both fields.",
+        [{ text: "OK" }],
+        { type: "warning" },
       );
       return;
     }
+
+    if (loading) return;
 
     setLoading(true);
 
@@ -212,9 +215,11 @@ export default function ResetPasswordScreen() {
           setPassword("");
           setConfirmPassword("");
 
-          Alert.alert(
+          showDialog(
             "Choose a different password",
             "This is already your current password. Please enter a new password that you haven't used before.",
+            [{ text: "OK" }],
+            { type: "warning" },
           );
 
           return;
@@ -231,9 +236,11 @@ export default function ResetPasswordScreen() {
           reason: "auth_error",
         });
 
-        Alert.alert(
+        showDialog(
           "Update failed",
           "We couldn't update your password. Please try again.",
+          [{ text: "OK" }],
+          { type: "error" },
         );
 
         return;
@@ -248,7 +255,7 @@ export default function ResetPasswordScreen() {
       setPassword("");
       setConfirmPassword("");
 
-      Alert.alert(
+      showDialog(
         "Password updated",
         "Your password has been changed successfully. Please log in with your new password.",
         [
@@ -257,7 +264,10 @@ export default function ResetPasswordScreen() {
             onPress: handleContinue,
           },
         ],
-        { cancelable: false },
+        {
+          type: "success",
+          cancelable: false,
+        },
       );
     } catch (error) {
       Sentry.logger.error("Unexpected password update error", {
@@ -271,9 +281,11 @@ export default function ResetPasswordScreen() {
         reason: "unexpected_error",
       });
 
-      Alert.alert(
+      showDialog(
         "Something went wrong",
         "We couldn't update your password. Please try again.",
+        [{ text: "OK" }],
+        { type: "error" },
       );
     } finally {
       setLoading(false);
@@ -288,6 +300,7 @@ export default function ResetPasswordScreen() {
       <ScrollView
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
         showsVerticalScrollIndicator={false}
       >
         <Pressable
@@ -296,7 +309,6 @@ export default function ResetPasswordScreen() {
           hitSlop={10}
         >
           <Ionicons name="arrow-back" size={21} color={C.text} />
-
           <Text style={styles.backText}>Back to login</Text>
         </Pressable>
 
@@ -317,7 +329,6 @@ export default function ResetPasswordScreen() {
         {recoveryStatus === "loading" ? (
           <View style={styles.messageCard}>
             <ActivityIndicator size="large" color={C.accent} />
-
             <Text style={styles.messageText}>
               Verifying your password reset link…
             </Text>
@@ -373,6 +384,8 @@ export default function ResetPasswordScreen() {
                   secureTextEntry={!passwordVisible}
                   autoCapitalize="none"
                   autoCorrect={false}
+                  textContentType="newPassword"
+                  autoComplete="new-password"
                   editable={!loading}
                   returnKeyType="next"
                 />
@@ -382,6 +395,7 @@ export default function ResetPasswordScreen() {
                     setPasswordVisible((visible) => !visible)
                   }
                   hitSlop={10}
+                  disabled={loading}
                 >
                   <Ionicons
                     name={
@@ -415,6 +429,8 @@ export default function ResetPasswordScreen() {
                   secureTextEntry={!passwordVisible}
                   autoCapitalize="none"
                   autoCorrect={false}
+                  textContentType="newPassword"
+                  autoComplete="new-password"
                   editable={!loading}
                   returnKeyType="done"
                   onSubmitEditing={handleUpdatePassword}

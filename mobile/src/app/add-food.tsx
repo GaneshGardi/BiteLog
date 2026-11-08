@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Keyboard,
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -31,6 +32,7 @@ import { supabase } from "@/lib/supabase";
 import { calculateFood, logFood, saveFood } from "@/lib/food";
 import { usePostHog } from "posthog-react-native";
 import { Sentry } from "@/lib/sentry";
+import { useAppDialog } from "@/contexts/AppDialogContext";
 
 type FoodSearchResult = {
   fdcId: number;
@@ -80,6 +82,7 @@ const C = {
 
 export default function AddFoodScreen() {
   const posthog = usePostHog();
+  const { showDialog } = useAppDialog();
 
   const [search, setSearch] = useState("");
   const [quantity, setQuantity] = useState("");
@@ -97,9 +100,16 @@ export default function AddFoodScreen() {
     const query = search.trim();
 
     if (!query) {
-      Alert.alert("Enter a food", "Try chicken, rice, oats, or another food.");
+      showDialog(
+        "Enter a food",
+        "Try chicken, rice, oats, or another food.",
+        [{ text: "OK" }],
+        { type: "warning" },
+      );
       return;
     }
+
+    if (loading || saving) return;
 
     Keyboard.dismiss();
     setLoading(true);
@@ -121,10 +131,20 @@ export default function AddFoodScreen() {
       setFoods(data?.foods ?? []);
       setHasSearched(true);
     } catch (error) {
-      console.error("Food search failed:", error);
-      Alert.alert(
+      Sentry.logger.error("Food search failed", {
+        operation: "food_search",
+      });
+      Sentry.captureException(error);
+
+      posthog.capture("food_search_failed", {
+        failure_stage: "search_food",
+      });
+
+      showDialog(
         "Search failed",
         "Could not search for food right now. Please try again.",
+        [{ text: "OK" }],
+        { type: "error" },
       );
     } finally {
       setLoading(false);
@@ -132,6 +152,8 @@ export default function AddFoodScreen() {
   }
 
   async function selectFood(food: FoodSearchResult) {
+    if (loading || saving) return;
+
     Keyboard.dismiss();
     setLoading(true);
     setCalculation(null);
@@ -149,10 +171,20 @@ export default function AddFoodScreen() {
       setFoods([]);
       setHasSearched(false);
     } catch (error) {
-      console.error("Saving food reference failed:", error);
-      Alert.alert(
+      Sentry.logger.error("Food reference selection failed", {
+        operation: "food_selection",
+      });
+      Sentry.captureException(error);
+
+      posthog.capture("food_selection_failed", {
+        failure_stage: "save_food_reference",
+      });
+
+      showDialog(
         "Could not select food",
-        "This food could not be added to the food database.",
+        "This food could not be added to the food database. Please try again.",
+        [{ text: "OK" }],
+        { type: "error" },
       );
     } finally {
       setLoading(false);
@@ -161,24 +193,38 @@ export default function AddFoodScreen() {
 
   async function calculateSelectedFood() {
     if (!selectedFood) {
-      Alert.alert("Select a food", "Choose a food first.");
+      showDialog(
+        "Select a food",
+        "Choose a food first.",
+        [{ text: "OK" }],
+        { type: "warning" },
+      );
       return;
     }
 
     const quantityG = Number(quantity);
 
     if (!Number.isFinite(quantityG) || quantityG <= 0) {
-      Alert.alert("Invalid quantity", "Enter a quantity greater than 0 grams.");
+      showDialog(
+        "Invalid quantity",
+        "Enter a quantity greater than 0 grams.",
+        [{ text: "OK" }],
+        { type: "warning" },
+      );
       return;
     }
 
     if (quantityG > 100000) {
-      Alert.alert(
+      showDialog(
         "Quantity too large",
         "Please enter a quantity of 100,000 grams or less.",
+        [{ text: "OK" }],
+        { type: "warning" },
       );
       return;
     }
+
+    if (loading || saving) return;
 
     Keyboard.dismiss();
     setLoading(true);
@@ -188,10 +234,20 @@ export default function AddFoodScreen() {
       const result = await calculateFood(selectedFood.id, quantityG);
       setCalculation(result);
     } catch (error) {
-      console.error("Food calculation failed:", error);
-      Alert.alert(
+      Sentry.logger.error("Food nutrition calculation failed", {
+        operation: "food_calculation",
+      });
+      Sentry.captureException(error);
+
+      posthog.capture("food_calculation_failed", {
+        failure_stage: "calculate_food",
+      });
+
+      showDialog(
         "Calculation failed",
         "Could not calculate nutrition. Please try again.",
+        [{ text: "OK" }],
+        { type: "error" },
       );
     } finally {
       setLoading(false);
@@ -199,10 +255,11 @@ export default function AddFoodScreen() {
   }
 
   async function confirmAndAdd() {
-    if (!selectedFood || !calculation || saving) {
+    if (!selectedFood || !calculation || saving || loading) {
       return;
     }
 
+    Keyboard.dismiss();
     setSaving(true);
 
     try {
@@ -224,7 +281,7 @@ export default function AddFoodScreen() {
         source: "manual",
       });
 
-      Alert.alert(
+      showDialog(
         "Food added!",
         `${selectedFood.name} has been added to today's log.`,
         [
@@ -233,24 +290,24 @@ export default function AddFoodScreen() {
             onPress: () => router.back(),
           },
         ],
+        { type: "success", cancelable: false },
       );
     } catch (error) {
-      Sentry.logger.warn("Food log could not be completed", {
+      Sentry.logger.error("Food log could not be completed", {
         operation: "food_log_created",
         source: "manual",
       });
-
       Sentry.captureException(error);
 
       posthog.capture("food_log_failed", {
         source: "manual",
       });
 
-      console.error("Food logging failed:", error);
-
-      Alert.alert(
+      showDialog(
         "Could not save",
         "Your food could not be added. Please try again.",
+        [{ text: "OK" }],
+        { type: "error" },
       );
     } finally {
       setSaving(false);
@@ -264,334 +321,342 @@ export default function AddFoodScreen() {
   }
 
   return (
-    <ScrollView
-      style={styles.screen}
-      contentContainerStyle={styles.container}
-      keyboardShouldPersistTaps="handled"
-      showsVerticalScrollIndicator={false}
+    <KeyboardAvoidingView
+      style={styles.keyboardContainer}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
     >
-      <View style={styles.header}>
-        <Pressable
-          onPress={() => router.back()}
-          style={styles.iconButton}
-          accessibilityRole="button"
-          accessibilityLabel="Go back"
-        >
-          <ArrowLeft size={21} color={C.text} />
-        </Pressable>
+      <ScrollView
+        style={styles.screen}
+        contentContainerStyle={styles.container}
+        keyboardShouldPersistTaps="handled"
+        keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.header}>
+          <Pressable
+            onPress={() => router.back()}
+            style={styles.iconButton}
+            accessibilityRole="button"
+            accessibilityLabel="Go back"
+          >
+            <ArrowLeft size={21} color={C.text} />
+          </Pressable>
 
-        <View style={styles.headerTitleWrap}>
-          <Text style={styles.headerEyebrow}>FOOD JOURNAL</Text>
-          <Text style={styles.headerTitle}>Add food</Text>
-        </View>
-
-        <View style={styles.headerIcon}>
-          <Utensils size={20} color={C.accent} />
-        </View>
-      </View>
-
-      <View style={styles.intro}>
-        <Text style={styles.title}>
-          Fuel your <Text style={styles.accentText}>goals.</Text>
-        </Text>
-        <Text style={styles.subtitle}>
-          Find your food, set the portion, and track its nutrition.
-        </Text>
-      </View>
-
-      <View style={styles.sectionHeading}>
-        <View style={styles.stepBadge}>
-          <Text style={styles.stepNumber}>01</Text>
-        </View>
-        <View style={styles.sectionHeadingText}>
-          <Text style={styles.sectionTitle}>Find your food</Text>
-          <Text style={styles.sectionSubtitle}>Search a food database</Text>
-        </View>
-      </View>
-
-      <View style={styles.searchCard}>
-        <View style={styles.searchInputWrap}>
-          <Search size={19} color={C.muted} />
-          <TextInput
-            value={search}
-            onChangeText={setSearch}
-            placeholder="e.g. chicken breast"
-            placeholderTextColor="#777777"
-            style={styles.searchInput}
-            onSubmitEditing={searchFoods}
-            returnKeyType="search"
-            editable={!loading && !saving}
-            accessibilityLabel="Search for a food"
-          />
-          {search.length > 0 && (
-            <Pressable
-              onPress={() => setSearch("")}
-              accessibilityRole="button"
-              accessibilityLabel="Clear search"
-              hitSlop={8}
-            >
-              <X size={17} color={C.muted} />
-            </Pressable>
-          )}
-        </View>
-
-        <Pressable
-          style={[styles.primaryButton, loading && styles.disabledButton]}
-          onPress={searchFoods}
-          disabled={loading || saving}
-        >
-          {loading ? (
-            <ActivityIndicator color={C.bg} />
-          ) : (
-            <>
-              <Search size={18} color={C.bg} />
-              <Text style={styles.primaryButtonText}>Search foods</Text>
-            </>
-          )}
-        </Pressable>
-      </View>
-
-      {loading && (
-        <View style={styles.loadingRow}>
-          <ActivityIndicator color={C.accent} size="small" />
-          <Text style={styles.mutedText}>Finding your food...</Text>
-        </View>
-      )}
-
-      {foods.length > 0 && (
-        <View style={styles.resultsSection}>
-          <View style={styles.resultsHeader}>
-            <Text style={styles.sectionTitle}>Search results</Text>
-            <Text style={styles.resultCount}>{foods.length} found</Text>
+          <View style={styles.headerTitleWrap}>
+            <Text style={styles.headerEyebrow}>FOOD JOURNAL</Text>
+            <Text style={styles.headerTitle}>Add food</Text>
           </View>
 
-          {foods.map((food) => (
-            <Pressable
-              key={food.fdcId}
-              style={styles.foodResult}
-              onPress={() => selectFood(food)}
-              disabled={loading || saving}
-            >
-              <View style={styles.foodResultIcon}>
-                <Utensils size={19} color={C.accent} />
-              </View>
-
-              <View style={styles.foodResultInfo}>
-                <Text style={styles.foodName}>{food.name}</Text>
-                {!!food.brand && (
-                  <Text style={styles.source}>{food.brand}</Text>
-                )}
-                {!!food.dataType && (
-                  <Text style={styles.source}>{food.dataType}</Text>
-                )}
-              </View>
-
-              <ChevronRight size={19} color={C.muted} />
-            </Pressable>
-          ))}
+          <View style={styles.headerIcon}>
+            <Utensils size={20} color={C.accent} />
+          </View>
         </View>
-      )}
 
-      {hasSearched && foods.length === 0 && !loading && (
-        <View style={styles.emptyCard}>
-          <Search size={25} color={C.muted} />
-          <Text style={styles.emptyTitle}>No foods found</Text>
-          <Text style={styles.mutedText}>
-            Try a different name, such as cooked rice or raw oats.
+        <View style={styles.intro}>
+          <Text style={styles.title}>
+            Fuel your <Text style={styles.accentText}>goals.</Text>
+          </Text>
+          <Text style={styles.subtitle}>
+            Find your food, set the portion, and track its nutrition.
           </Text>
         </View>
-      )}
 
-      {selectedFood && (
-        <>
-          <View style={styles.sectionHeading}>
-            <View style={styles.stepBadge}>
-              <Text style={styles.stepNumber}>02</Text>
-            </View>
-            <View style={styles.sectionHeadingText}>
-              <Text style={styles.sectionTitle}>Set your portion</Text>
-              <Text style={styles.sectionSubtitle}>
-                Nutrition is calculated by weight
-              </Text>
-            </View>
+        <View style={styles.sectionHeading}>
+          <View style={styles.stepBadge}>
+            <Text style={styles.stepNumber}>01</Text>
           </View>
+          <View style={styles.sectionHeadingText}>
+            <Text style={styles.sectionTitle}>Find your food</Text>
+            <Text style={styles.sectionSubtitle}>Search a food database</Text>
+          </View>
+        </View>
 
-          <View style={styles.selectedCard}>
-            <View style={styles.selectedTop}>
-              <View style={styles.selectedIcon}>
-                <CheckCircle2 size={21} color={C.accent} />
-              </View>
-              <View style={styles.selectedInfo}>
-                <Text style={styles.selectedLabel}>SELECTED FOOD</Text>
-                <Text style={styles.selectedName}>{selectedFood.name}</Text>
-                {!!selectedFood.source && (
-                  <Text style={styles.source}>{selectedFood.source}</Text>
-                )}
-              </View>
+        <View style={styles.searchCard}>
+          <View style={styles.searchInputWrap}>
+            <Search size={19} color={C.muted} />
+            <TextInput
+              value={search}
+              onChangeText={setSearch}
+              placeholder="e.g. chicken breast"
+              placeholderTextColor="#777777"
+              style={styles.searchInput}
+              onSubmitEditing={searchFoods}
+              returnKeyType="search"
+              editable={!loading && !saving}
+              accessibilityLabel="Search for a food"
+            />
+            {search.length > 0 && (
               <Pressable
-                onPress={resetSelection}
-                style={styles.smallIconButton}
+                onPress={() => setSearch("")}
                 accessibilityRole="button"
-                accessibilityLabel="Change selected food"
+                accessibilityLabel="Clear search"
+                hitSlop={8}
               >
                 <X size={17} color={C.muted} />
               </Pressable>
-            </View>
-
-            <View style={styles.divider} />
-
-            <Text style={styles.inputLabel}>PORTION SIZE</Text>
-            <View style={styles.quantityRow}>
-              <Scale size={20} color={C.muted} />
-              <TextInput
-                value={quantity}
-                onChangeText={(value) => {
-                  setQuantity(value);
-                  setCalculation(null);
-                }}
-                placeholder="Enter quantity"
-                placeholderTextColor="#777777"
-                keyboardType="decimal-pad"
-                style={styles.quantityInput}
-                accessibilityLabel="Quantity in grams"
-                editable={!loading && !saving}
-              />
-              <View style={styles.gramBadge}>
-                <Text style={styles.gramText}>GRAMS</Text>
-              </View>
-            </View>
-
-            <Pressable
-              style={[styles.primaryButton, loading && styles.disabledButton]}
-              onPress={calculateSelectedFood}
-              disabled={loading || saving}
-            >
-              {loading ? (
-                <ActivityIndicator color={C.bg} />
-              ) : (
-                <>
-                  <Flame size={18} color={C.bg} />
-                  <Text style={styles.primaryButtonText}>
-                    Calculate nutrition
-                  </Text>
-                </>
-              )}
-            </Pressable>
-          </View>
-        </>
-      )}
-
-      {calculation && (
-        <>
-          <View style={styles.sectionHeading}>
-            <View style={styles.stepBadge}>
-              <Text style={styles.stepNumber}>03</Text>
-            </View>
-            <View style={styles.sectionHeadingText}>
-              <Text style={styles.sectionTitle}>Nutrition preview</Text>
-              <Text style={styles.sectionSubtitle}>
-                Review before adding to your log
-              </Text>
-            </View>
+            )}
           </View>
 
-          <View style={styles.nutritionCard}>
-            <View style={styles.caloriePanel}>
-              <View style={styles.calorieIcon}>
-                <Flame size={21} color={C.accent} />
+          <Pressable
+            style={[styles.primaryButton, loading && styles.disabledButton]}
+            onPress={searchFoods}
+            disabled={loading || saving}
+          >
+            {loading ? (
+              <ActivityIndicator color={C.bg} />
+            ) : (
+              <>
+                <Search size={18} color={C.bg} />
+                <Text style={styles.primaryButtonText}>Search foods</Text>
+              </>
+            )}
+          </Pressable>
+        </View>
+
+        {loading && (
+          <View style={styles.loadingRow}>
+            <ActivityIndicator color={C.accent} size="small" />
+            <Text style={styles.mutedText}>Finding your food...</Text>
+          </View>
+        )}
+
+        {foods.length > 0 && (
+          <View style={styles.resultsSection}>
+            <View style={styles.resultsHeader}>
+              <Text style={styles.sectionTitle}>Search results</Text>
+              <Text style={styles.resultCount}>{foods.length} found</Text>
+            </View>
+
+            {foods.map((food) => (
+              <Pressable
+                key={food.fdcId}
+                style={styles.foodResult}
+                onPress={() => selectFood(food)}
+                disabled={loading || saving}
+              >
+                <View style={styles.foodResultIcon}>
+                  <Utensils size={19} color={C.accent} />
+                </View>
+
+                <View style={styles.foodResultInfo}>
+                  <Text style={styles.foodName}>{food.name}</Text>
+                  {!!food.brand && (
+                    <Text style={styles.source}>{food.brand}</Text>
+                  )}
+                  {!!food.dataType && (
+                    <Text style={styles.source}>{food.dataType}</Text>
+                  )}
+                </View>
+
+                <ChevronRight size={19} color={C.muted} />
+              </Pressable>
+            ))}
+          </View>
+        )}
+
+        {hasSearched && foods.length === 0 && !loading && (
+          <View style={styles.emptyCard}>
+            <Search size={25} color={C.muted} />
+            <Text style={styles.emptyTitle}>No foods found</Text>
+            <Text style={styles.mutedText}>
+              Try a different name, such as cooked rice or raw oats.
+            </Text>
+          </View>
+        )}
+
+        {selectedFood && (
+          <>
+            <View style={styles.sectionHeading}>
+              <View style={styles.stepBadge}>
+                <Text style={styles.stepNumber}>02</Text>
               </View>
-              <Text style={styles.calorieLabel}>TOTAL CALORIES</Text>
-              <View style={styles.calorieValueRow}>
-                <Text style={styles.calorieValue}>
-                  {calculation.nutrition.calories === null
-                    ? "—"
-                    : Math.round(calculation.nutrition.calories)}
+              <View style={styles.sectionHeadingText}>
+                <Text style={styles.sectionTitle}>Set your portion</Text>
+                <Text style={styles.sectionSubtitle}>
+                  Nutrition is calculated by weight
                 </Text>
-                <Text style={styles.calorieUnit}>kcal</Text>
               </View>
-              <Text style={styles.calorieFootnote}>
-                {calculation.quantity_g} g serving
-              </Text>
             </View>
 
-            <View style={styles.macroGrid}>
-              <Macro
-                label="Protein"
-                value={calculation.nutrition.protein}
-                suffix="g"
-                icon={<Beef size={17} color={C.accent} />}
-              />
-              <Macro
-                label="Carbs"
-                value={calculation.nutrition.carbs}
-                suffix="g"
-                icon={<Wheat size={17} color="#E8C477" />}
-              />
-              <Macro
-                label="Fat"
-                value={calculation.nutrition.fat}
-                suffix="g"
-                icon={<Droplets size={17} color="#8BCBFF" />}
-              />
-              <Macro
-                label="Fiber"
-                value={calculation.nutrition.fiber}
-                suffix="g"
-                icon={<Leaf size={17} color="#9EE0B0" />}
-              />
+            <View style={styles.selectedCard}>
+              <View style={styles.selectedTop}>
+                <View style={styles.selectedIcon}>
+                  <CheckCircle2 size={21} color={C.accent} />
+                </View>
+                <View style={styles.selectedInfo}>
+                  <Text style={styles.selectedLabel}>SELECTED FOOD</Text>
+                  <Text style={styles.selectedName}>{selectedFood.name}</Text>
+                  {!!selectedFood.source && (
+                    <Text style={styles.source}>{selectedFood.source}</Text>
+                  )}
+                </View>
+                <Pressable
+                  onPress={resetSelection}
+                  style={styles.smallIconButton}
+                  accessibilityRole="button"
+                  accessibilityLabel="Change selected food"
+                >
+                  <X size={17} color={C.muted} />
+                </Pressable>
+              </View>
+
+              <View style={styles.divider} />
+
+              <Text style={styles.inputLabel}>PORTION SIZE</Text>
+              <View style={styles.quantityRow}>
+                <Scale size={20} color={C.muted} />
+                <TextInput
+                  value={quantity}
+                  onChangeText={(value) => {
+                    setQuantity(value);
+                    setCalculation(null);
+                  }}
+                  placeholder="Enter quantity"
+                  placeholderTextColor="#777777"
+                  keyboardType="decimal-pad"
+                  style={styles.quantityInput}
+                  accessibilityLabel="Quantity in grams"
+                  editable={!loading && !saving}
+                  returnKeyType="done"
+                  onSubmitEditing={calculateSelectedFood}
+                />
+                <View style={styles.gramBadge}>
+                  <Text style={styles.gramText}>GRAMS</Text>
+                </View>
+              </View>
+
+              <Pressable
+                style={[styles.primaryButton, loading && styles.disabledButton]}
+                onPress={calculateSelectedFood}
+                disabled={loading || saving}
+              >
+                {loading ? (
+                  <ActivityIndicator color={C.bg} />
+                ) : (
+                  <>
+                    <Flame size={18} color={C.bg} />
+                    <Text style={styles.primaryButtonText}>
+                      Calculate nutrition
+                    </Text>
+                  </>
+                )}
+              </Pressable>
+            </View>
+          </>
+        )}
+
+        {calculation && (
+          <>
+            <View style={styles.sectionHeading}>
+              <View style={styles.stepBadge}>
+                <Text style={styles.stepNumber}>03</Text>
+              </View>
+              <View style={styles.sectionHeadingText}>
+                <Text style={styles.sectionTitle}>Nutrition preview</Text>
+                <Text style={styles.sectionSubtitle}>
+                  Review before adding to your log
+                </Text>
+              </View>
             </View>
 
-            <View style={styles.notice}>
-              <Text style={styles.noticeText}>
-                Nutrition values are estimates. Actual values can vary with
-                ingredients and preparation.
-              </Text>
-            </View>
-
-            <Pressable
-              style={[styles.primaryButton, saving && styles.disabledButton]}
-              onPress={confirmAndAdd}
-              disabled={saving || loading}
-            >
-              {saving ? (
-                <ActivityIndicator color={C.bg} />
-              ) : (
-                <>
-                  <Plus size={19} color={C.bg} />
-                  <Text style={styles.primaryButtonText}>
-                    Confirm & add food
+            <View style={styles.nutritionCard}>
+              <View style={styles.caloriePanel}>
+                <View style={styles.calorieIcon}>
+                  <Flame size={21} color={C.accent} />
+                </View>
+                <Text style={styles.calorieLabel}>TOTAL CALORIES</Text>
+                <View style={styles.calorieValueRow}>
+                  <Text style={styles.calorieValue}>
+                    {calculation.nutrition.calories === null
+                      ? "—"
+                      : Math.round(calculation.nutrition.calories)}
                   </Text>
-                </>
-              )}
-            </Pressable>
+                  <Text style={styles.calorieUnit}>kcal</Text>
+                </View>
+                <Text style={styles.calorieFootnote}>
+                  {calculation.quantity_g} g serving
+                </Text>
+              </View>
 
-            <Pressable
-              style={styles.secondaryButton}
-              onPress={calculateSelectedFood}
-              disabled={saving || loading}
-            >
-              <Text style={styles.secondaryButtonText}>
-                Recalculate portion
-              </Text>
-            </Pressable>
-          </View>
-        </>
-      )}
+              <View style={styles.macroGrid}>
+                <Macro
+                  label="Protein"
+                  value={calculation.nutrition.protein}
+                  suffix="g"
+                  icon={<Beef size={17} color={C.accent} />}
+                />
+                <Macro
+                  label="Carbs"
+                  value={calculation.nutrition.carbs}
+                  suffix="g"
+                  icon={<Wheat size={17} color="#E8C477" />}
+                />
+                <Macro
+                  label="Fat"
+                  value={calculation.nutrition.fat}
+                  suffix="g"
+                  icon={<Droplets size={17} color="#8BCBFF" />}
+                />
+                <Macro
+                  label="Fiber"
+                  value={calculation.nutrition.fiber}
+                  suffix="g"
+                  icon={<Leaf size={17} color="#9EE0B0" />}
+                />
+              </View>
 
-      <Pressable
-        style={styles.cancelButton}
-        onPress={() => router.back()}
-        disabled={saving}
-      >
-        <ArrowLeft size={16} color={C.muted} />
-        <Text style={styles.cancelText}>Back to dashboard</Text>
-      </Pressable>
+              <View style={styles.notice}>
+                <Text style={styles.noticeText}>
+                  Nutrition values are estimates. Actual values can vary with
+                  ingredients and preparation.
+                </Text>
+              </View>
 
-      <View style={styles.footer}>
-        <View style={styles.footerDot} />
-        <Text style={styles.footerText}>SMALL STEPS. CONSISTENT PROGRESS.</Text>
-      </View>
-    </ScrollView>
+              <Pressable
+                style={[styles.primaryButton, saving && styles.disabledButton]}
+                onPress={confirmAndAdd}
+                disabled={saving || loading}
+              >
+                {saving ? (
+                  <ActivityIndicator color={C.bg} />
+                ) : (
+                  <>
+                    <Plus size={19} color={C.bg} />
+                    <Text style={styles.primaryButtonText}>
+                      Confirm & add food
+                    </Text>
+                  </>
+                )}
+              </Pressable>
+
+              <Pressable
+                style={styles.secondaryButton}
+                onPress={calculateSelectedFood}
+                disabled={saving || loading}
+              >
+                <Text style={styles.secondaryButtonText}>
+                  Recalculate portion
+                </Text>
+              </Pressable>
+            </View>
+          </>
+        )}
+
+        <Pressable
+          style={styles.cancelButton}
+          onPress={() => router.back()}
+          disabled={saving}
+        >
+          <ArrowLeft size={16} color={C.muted} />
+          <Text style={styles.cancelText}>Back to dashboard</Text>
+        </Pressable>
+
+        <View style={styles.footer}>
+          <View style={styles.footerDot} />
+          <Text style={styles.footerText}>SMALL STEPS. CONSISTENT PROGRESS.</Text>
+        </View>
+      </ScrollView>
+    </KeyboardAvoidingView>
   );
 }
 
@@ -604,7 +669,7 @@ function Macro({
   label: string;
   value: number | null;
   suffix: string;
-  icon: React.ReactNode;
+  icon: ReactNode;
 }) {
   return (
     <View style={styles.macroCard}>
@@ -620,6 +685,10 @@ function Macro({
 }
 
 const styles = StyleSheet.create({
+  keyboardContainer: {
+    flex: 1,
+    backgroundColor: C.bg,
+  },
   screen: {
     flex: 1,
     backgroundColor: C.bg,

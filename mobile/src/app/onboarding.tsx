@@ -1,7 +1,6 @@
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -14,10 +13,11 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
 import DateTimePicker from "@react-native-community/datetimepicker";
+import { usePostHog } from "posthog-react-native";
 
 import { supabase } from "../lib/supabase";
-import { usePostHog } from "posthog-react-native";
 import { Sentry } from "../lib/sentry";
+import { useAppDialog } from "../contexts/AppDialogContext";
 
 const C = {
   background: "#101010",
@@ -63,14 +63,8 @@ const genders = [
 
 export default function OnboardingScreen() {
   const posthog = usePostHog();
+  const { showDialog } = useAppDialog();
 
-  useEffect(() => {
-    posthog.capture("onboarding_started");
-
-    Sentry.logger.info("Onboarding started", {
-      operation: "onboarding",
-    });
-  }, [posthog]);
   const [birthDate, setBirthDate] = useState("");
   const [gender, setGender] = useState("");
   const [height, setHeight] = useState("");
@@ -79,7 +73,14 @@ export default function OnboardingScreen() {
   const [loading, setLoading] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
 
-  // Format date for display
+  useEffect(() => {
+    posthog.capture("onboarding_started");
+
+    Sentry.logger.info("Onboarding started", {
+      operation: "onboarding",
+    });
+  }, [posthog]);
+
   const formatDateForDisplay = (dateString: string) => {
     if (!dateString) return "";
 
@@ -93,8 +94,10 @@ export default function OnboardingScreen() {
     });
   };
 
-  // Handle native date picker selection
-  const handleDateChange = (event: { type: string }, selectedDate?: Date) => {
+  const handleDateChange = (
+    event: { type: string },
+    selectedDate?: Date,
+  ) => {
     setShowDatePicker(false);
 
     if (event.type === "set" && selectedDate) {
@@ -106,25 +109,41 @@ export default function OnboardingScreen() {
     }
   };
 
-  // Handle native date picker selection
   const handleContinue = async () => {
-    if (!birthDate || !gender || !height || !weight || !goal) {
-      Alert.alert("Missing information", "Please complete all fields.");
+    if (!birthDate || !gender || !height.trim() || !weight.trim() || !goal) {
+      showDialog(
+        "Missing information",
+        "Please complete all fields before continuing.",
+        [{ text: "Got it" }],
+        { type: "warning" },
+      );
       return;
     }
 
     const heightCm = Number(height);
     const weightKg = Number(weight);
 
-    if (Number.isNaN(heightCm) || heightCm <= 0) {
-      Alert.alert("Invalid height", "Please enter a valid height in cm.");
+    if (!Number.isFinite(heightCm) || heightCm <= 0) {
+      showDialog(
+        "Invalid height",
+        "Please enter a valid height in centimetres.",
+        [{ text: "OK" }],
+        { type: "warning" },
+      );
       return;
     }
 
-    if (Number.isNaN(weightKg) || weightKg <= 0) {
-      Alert.alert("Invalid weight", "Please enter a valid weight in kg.");
+    if (!Number.isFinite(weightKg) || weightKg <= 0) {
+      showDialog(
+        "Invalid weight",
+        "Please enter a valid weight in kilograms.",
+        [{ text: "OK" }],
+        { type: "warning" },
+      );
       return;
     }
+
+    if (loading) return;
 
     setLoading(true);
 
@@ -144,8 +163,17 @@ export default function OnboardingScreen() {
           failure_stage: "session_lookup",
         });
 
-        Alert.alert("Session expired", "Please log in again.");
-        router.replace("/login");
+        showDialog(
+          "Session expired",
+          "Please log in again to continue setting up your profile.",
+          [
+            {
+              text: "Log in",
+              onPress: () => router.replace("/login"),
+            },
+          ],
+          { type: "error" },
+        );
         return;
       }
 
@@ -172,7 +200,12 @@ export default function OnboardingScreen() {
           failure_stage: "profile_update",
         });
 
-        Alert.alert("Could not save profile", error.message);
+        showDialog(
+          "Could not save profile",
+          "We couldn't save your profile details. Please try again.",
+          [{ text: "OK" }],
+          { type: "error" },
+        );
         return;
       }
 
@@ -194,7 +227,12 @@ export default function OnboardingScreen() {
         failure_stage: "unexpected_error",
       });
 
-      Alert.alert("Something went wrong", "Please try again.");
+      showDialog(
+        "Something went wrong",
+        "We couldn't complete your profile setup. Please try again.",
+        [{ text: "OK" }],
+        { type: "error" },
+      );
     } finally {
       setLoading(false);
     }
@@ -203,11 +241,15 @@ export default function OnboardingScreen() {
   return (
     <KeyboardAvoidingView
       style={styles.container}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      keyboardVerticalOffset={0}
     >
       <ScrollView
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode={
+          Platform.OS === "ios" ? "interactive" : "on-drag"
+        }
         showsVerticalScrollIndicator={false}
       >
         {/* Brand */}
@@ -241,10 +283,12 @@ export default function OnboardingScreen() {
             style={styles.inputContainer}
             onPress={() => setShowDatePicker(true)}
             disabled={loading}
+            accessibilityRole="button"
+            accessibilityLabel="Select date of birth"
           >
             <Ionicons name="calendar-outline" size={19} color={C.muted} />
 
-            <Text style={[styles.input, !birthDate && { color: C.muted }]}>
+            <Text style={[styles.input, !birthDate && styles.placeholderText]}>
               {birthDate
                 ? formatDateForDisplay(birthDate)
                 : "Select your date of birth"}
@@ -290,6 +334,8 @@ export default function OnboardingScreen() {
                   ]}
                   onPress={() => setGender(item.value)}
                   disabled={loading}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected }}
                 >
                   <Text
                     style={[
@@ -326,6 +372,7 @@ export default function OnboardingScreen() {
               onChangeText={setHeight}
               keyboardType="decimal-pad"
               editable={!loading}
+              returnKeyType="next"
             />
 
             <View style={styles.unitBadge}>
@@ -347,6 +394,8 @@ export default function OnboardingScreen() {
               onChangeText={setWeight}
               keyboardType="decimal-pad"
               editable={!loading}
+              returnKeyType="done"
+              onSubmitEditing={handleContinue}
             />
 
             <View style={styles.unitBadge}>
@@ -370,6 +419,8 @@ export default function OnboardingScreen() {
                   ]}
                   onPress={() => setGoal(item.value)}
                   disabled={loading}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected }}
                 >
                   <View
                     style={[
@@ -461,7 +512,6 @@ const styles = StyleSheet.create({
     paddingBottom: 35,
   },
 
-  // Brand
   brand: {
     flexDirection: "row",
     alignItems: "center",
@@ -489,7 +539,6 @@ const styles = StyleSheet.create({
     color: C.accent,
   },
 
-  // Heading
   header: {
     marginBottom: 27,
   },
@@ -517,7 +566,6 @@ const styles = StyleSheet.create({
     color: C.secondary,
   },
 
-  // Form
   form: {
     width: "100%",
   },
@@ -551,6 +599,10 @@ const styles = StyleSheet.create({
     textAlignVertical: "center",
   },
 
+  placeholderText: {
+    color: C.muted,
+  },
+
   unitBadge: {
     paddingHorizontal: 10,
     paddingVertical: 6,
@@ -564,7 +616,6 @@ const styles = StyleSheet.create({
     fontWeight: "800",
   },
 
-  // Gender
   genderGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -600,7 +651,6 @@ const styles = StyleSheet.create({
     fontWeight: "800",
   },
 
-  // Goals
   goalContainer: {
     gap: 10,
   },
@@ -655,7 +705,6 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
 
-  // Button
   button: {
     height: 55,
     marginTop: 30,
@@ -682,7 +731,6 @@ const styles = StyleSheet.create({
     fontWeight: "900",
   },
 
-  // Footer
   footer: {
     flexDirection: "row",
     alignItems: "center",

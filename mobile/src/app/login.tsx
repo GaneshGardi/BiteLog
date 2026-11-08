@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
+import type { ComponentRef } from "react";
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -18,6 +18,7 @@ import { supabase } from "../lib/supabase";
 import BiteLogMark from "../components/BiteLogoMark";
 import { usePostHog } from "posthog-react-native";
 import { Sentry } from "../lib/sentry";
+import { useAppDialog } from "../contexts/AppDialogContext";
 
 const C = {
   background: "#101010",
@@ -32,6 +33,8 @@ const C = {
 
 export default function LoginScreen() {
   const posthog = usePostHog();
+  const { showDialog } = useAppDialog();
+  const passwordInputRef = useRef<ComponentRef<typeof TextInput>>(null);
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -42,12 +45,16 @@ export default function LoginScreen() {
     const cleanEmail = email.trim().toLowerCase();
 
     if (!cleanEmail || !password) {
-      Alert.alert(
+      showDialog(
         "Missing information",
         "Please enter your email and password.",
+        [{ text: "OK" }],
+        { type: "warning" },
       );
       return;
     }
+
+    if (loading) return;
 
     setLoading(true);
 
@@ -68,7 +75,9 @@ export default function LoginScreen() {
           failure_stage: "authentication",
         });
 
-        Alert.alert("Login failed", error.message);
+        showDialog("Login failed", error.message, [{ text: "Try again" }], {
+          type: "error",
+        });
         return;
       }
 
@@ -82,9 +91,11 @@ export default function LoginScreen() {
           failure_stage: "missing_session",
         });
 
-        Alert.alert(
+        showDialog(
           "Login failed",
-          "Login succeeded but no session was created.",
+          "Login succeeded but no session was created. Please try again.",
+          [{ text: "OK" }],
+          { type: "error" },
         );
         return;
       }
@@ -116,9 +127,11 @@ export default function LoginScreen() {
 
         posthog.capture("login_goal_lookup_failed");
 
-        Alert.alert(
+        showDialog(
           "Could not load calorie goal",
-          "Please try logging in again.",
+          "Your login succeeded, but we couldn't load your calorie goal. Please try again.",
+          [{ text: "OK" }],
+          { type: "error" },
         );
         return;
       }
@@ -140,7 +153,12 @@ export default function LoginScreen() {
         failure_stage: "unexpected_error",
       });
 
-      Alert.alert("Something went wrong", "Please try again.");
+      showDialog(
+        "Something went wrong",
+        "We couldn't log you in. Please check your connection and try again.",
+        [{ text: "OK" }],
+        { type: "error" },
+      );
     } finally {
       setLoading(false);
     }
@@ -149,11 +167,13 @@ export default function LoginScreen() {
   return (
     <KeyboardAvoidingView
       style={styles.container}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      keyboardVerticalOffset={0}
     >
       <ScrollView
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
         showsVerticalScrollIndicator={false}
       >
         {/* Brand */}
@@ -194,8 +214,10 @@ export default function LoginScreen() {
               autoCapitalize="none"
               autoCorrect={false}
               keyboardType="email-address"
+              autoComplete="email"
               editable={!loading}
               returnKeyType="next"
+              onSubmitEditing={() => passwordInputRef.current?.focus()}
             />
           </View>
 
@@ -205,6 +227,7 @@ export default function LoginScreen() {
             <Ionicons name="lock-closed-outline" size={19} color={C.muted} />
 
             <TextInput
+              ref={passwordInputRef}
               style={styles.input}
               placeholder="Enter your password"
               placeholderTextColor={C.muted}
@@ -213,6 +236,7 @@ export default function LoginScreen() {
               secureTextEntry={!passwordVisible}
               autoCapitalize="none"
               autoCorrect={false}
+              autoComplete="current-password"
               editable={!loading}
               returnKeyType="go"
               onSubmitEditing={handleLogin}
@@ -222,6 +246,10 @@ export default function LoginScreen() {
               onPress={() => setPasswordVisible((visible) => !visible)}
               disabled={loading}
               hitSlop={10}
+              accessibilityRole="button"
+              accessibilityLabel={
+                passwordVisible ? "Hide password" : "Show password"
+              }
             >
               <Ionicons
                 name={passwordVisible ? "eye-off-outline" : "eye-outline"}

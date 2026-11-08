@@ -1,7 +1,6 @@
 import { useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -13,10 +12,11 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { router } from "expo-router";
+import { usePostHog } from "posthog-react-native";
 
 import { supabase } from "../lib/supabase";
-import { usePostHog } from "posthog-react-native";
 import { Sentry } from "../lib/sentry";
+import { useAppDialog } from "../contexts/AppDialogContext";
 
 const C = {
   background: "#101010",
@@ -31,17 +31,27 @@ const C = {
 
 export default function CalorieGoalScreen() {
   const posthog = usePostHog();
+  const { showDialog } = useAppDialog();
 
   const [calories, setCalories] = useState("");
   const [saving, setSaving] = useState(false);
 
   const handleSave = async () => {
-    const dailyCalories = Number(calories);
+    if (saving) return;
 
-    if (!dailyCalories || dailyCalories <= 0) {
-      Alert.alert(
+    const cleanCalories = calories.trim();
+    const dailyCalories = Number(cleanCalories);
+
+    if (
+      !cleanCalories ||
+      !Number.isFinite(dailyCalories) ||
+      dailyCalories <= 0
+    ) {
+      showDialog(
         "Invalid calorie goal",
-        "Please enter a valid daily calorie goal.",
+        "Please enter a valid daily calorie goal greater than zero.",
+        [{ text: "OK" }],
+        { type: "warning" },
       );
       return;
     }
@@ -63,7 +73,17 @@ export default function CalorieGoalScreen() {
           failure_stage: "session_lookup",
         });
 
-        Alert.alert("Session error", "Please log in again.");
+        showDialog(
+          "Session expired",
+          "Please log in again to save your calorie goal.",
+          [
+            {
+              text: "Go to login",
+              onPress: () => router.replace("/login"),
+            },
+          ],
+          { type: "warning", cancelable: false },
+        );
         return;
       }
 
@@ -76,6 +96,7 @@ export default function CalorieGoalScreen() {
       if (error) {
         Sentry.logger.error("Calorie goal save failed", {
           operation: "save_calorie_goal",
+          reason: "database_insert",
         });
 
         Sentry.captureException(error);
@@ -84,7 +105,12 @@ export default function CalorieGoalScreen() {
           failure_stage: "database_insert",
         });
 
-        Alert.alert("Could not save goal", error.message);
+        showDialog(
+          "Could not save goal",
+          "We couldn't save your calorie goal. Please try again.",
+          [{ text: "OK" }],
+          { type: "error" },
+        );
         return;
       }
 
@@ -100,6 +126,7 @@ export default function CalorieGoalScreen() {
     } catch (error) {
       Sentry.logger.error("Unexpected calorie goal save error", {
         operation: "save_calorie_goal",
+        reason: "unexpected_error",
       });
 
       Sentry.captureException(error);
@@ -108,9 +135,11 @@ export default function CalorieGoalScreen() {
         failure_stage: "unexpected_error",
       });
 
-      Alert.alert(
+      showDialog(
         "Could not save goal",
-        "Something went wrong. Please try again.",
+        "Something went wrong while saving your calorie goal. Please try again.",
+        [{ text: "OK" }],
+        { type: "error" },
       );
     } finally {
       setSaving(false);
@@ -120,11 +149,13 @@ export default function CalorieGoalScreen() {
   return (
     <KeyboardAvoidingView
       style={styles.container}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      keyboardVerticalOffset={0}
     >
       <ScrollView
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
         showsVerticalScrollIndicator={false}
       >
         {/* Brand */}
@@ -134,7 +165,7 @@ export default function CalorieGoalScreen() {
           </View>
 
           <Text style={styles.brandName}>
-            fun<Text style={styles.brandAccent}>tracker</Text>
+            Bite<Text style={styles.brandAccent}>Log</Text>
           </Text>
         </View>
 
@@ -142,7 +173,9 @@ export default function CalorieGoalScreen() {
         <View style={styles.header}>
           <Text style={styles.eyebrow}>ONE LAST STEP</Text>
 
-          <Text style={styles.title}>Set your daily{"\n"}calorie goal.</Text>
+          <Text style={styles.title}>
+            Set your daily{"\n"}calorie goal.
+          </Text>
 
           <Text style={styles.subtitle}>
             Choose your daily calorie target. We'll use it to help you monitor
@@ -170,6 +203,7 @@ export default function CalorieGoalScreen() {
               maxLength={5}
               returnKeyType="done"
               onSubmitEditing={handleSave}
+              accessibilityLabel="Daily calorie goal in kilocalories"
             />
 
             <Text style={styles.unit}>kcal</Text>

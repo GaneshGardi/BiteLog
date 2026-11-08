@@ -1,8 +1,8 @@
-import React, { useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Image,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -34,6 +34,7 @@ import { router } from "expo-router";
 import { supabase } from "../lib/supabase";
 import { usePostHog } from "posthog-react-native";
 import { Sentry } from "../lib/sentry";
+import { useAppDialog } from "../contexts/AppDialogContext";
 
 type MealItem = {
   name: string;
@@ -83,6 +84,7 @@ const numberValue = (value: string) => Number(value.trim());
 
 export default function ScanMealScreen() {
   const posthog = usePostHog();
+  const { showDialog } = useAppDialog();
 
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [imageBase64, setImageBase64] = useState<string | null>(null);
@@ -110,17 +112,21 @@ export default function ScanMealScreen() {
   }, [meal]);
 
   const pickImage = async (useCamera: boolean) => {
+    if (analyzing || saving) return;
+
     try {
       const permission = useCamera
         ? await ImagePicker.requestCameraPermissionsAsync()
         : await ImagePicker.requestMediaLibraryPermissionsAsync();
 
       if (!permission.granted) {
-        Alert.alert(
+        showDialog(
           "Permission needed",
           useCamera
             ? "Allow camera access to take a photo of your meal."
             : "Allow photo library access to select a meal image.",
+          [{ text: "OK" }],
+          { type: "warning" },
         );
         return;
       }
@@ -144,9 +150,11 @@ export default function ScanMealScreen() {
       const asset = result.assets[0];
 
       if (!asset.base64) {
-        Alert.alert(
+        showDialog(
           "Could not read image",
           "Please select another photo and try again.",
+          [{ text: "OK" }],
+          { type: "error" },
         );
         return;
       }
@@ -158,22 +166,41 @@ export default function ScanMealScreen() {
       setShowAddForm(false);
       setNewFood({ ...emptyFood });
     } catch (error) {
-      console.error("Image picker error:", error);
-      Alert.alert("Unable to open images", "Please try again.");
+      Sentry.logger.error("Meal image picker failed", {
+        operation: "meal_image_picker",
+        source: useCamera ? "camera" : "gallery",
+      });
+      Sentry.captureException(error);
+      posthog.capture("meal_image_picker_failed", {
+        source: useCamera ? "camera" : "gallery",
+      });
+
+      showDialog(
+        "Unable to open images",
+        "Please try again.",
+        [{ text: "OK" }],
+        { type: "error" },
+      );
     }
   };
 
   const analyzeMeal = async () => {
     if (!imageBase64) {
-      Alert.alert(
+      showDialog(
         "Select a photo",
         "Take a photo or choose one from your gallery first.",
+        [{ text: "OK" }],
+        { type: "warning" },
       );
       return;
     }
 
+    if (analyzing || saving) return;
+
+    Keyboard.dismiss();
     setAnalyzing(true);
     posthog.capture("meal_scan_started");
+
     try {
       const { data, error } = await supabase.functions.invoke("analyze-meal", {
         body: {
@@ -213,20 +240,18 @@ export default function ScanMealScreen() {
       setShowAddForm(false);
 
       if (normalizedMeal.items.length === 0) {
-        Alert.alert(
+        showDialog(
           "No food detected",
           "Try a clearer photo with the food visible from above.",
+          [{ text: "OK" }],
+          { type: "warning" },
         );
       }
     } catch (error) {
-      console.error("Meal analysis error:", error);
-
       Sentry.logger.error("Meal analysis failed", {
         operation: "meal_analysis",
       });
-
       Sentry.captureException(error);
-
       posthog.capture("meal_scan_failed");
 
       const message =
@@ -234,7 +259,12 @@ export default function ScanMealScreen() {
           ? error.message
           : "Something went wrong while analyzing your meal.";
 
-      Alert.alert("Could not analyze meal", message);
+      showDialog(
+        "Could not analyze meal",
+        message,
+        [{ text: "OK" }],
+        { type: "error" },
+      );
     } finally {
       setAnalyzing(false);
     }
@@ -293,6 +323,7 @@ export default function ScanMealScreen() {
         keyboardType="decimal-pad"
         placeholder={placeholder}
         placeholderTextColor={C.muted}
+        editable={!saving && !analyzing}
       />
     </View>
   );
@@ -307,7 +338,12 @@ export default function ScanMealScreen() {
     const fiber = numberValue(newFood.fiber);
 
     if (!name) {
-      Alert.alert("Food name required", "Enter a name for this food item.");
+      showDialog(
+        "Food name required",
+        "Enter a name for this food item.",
+        [{ text: "OK" }],
+        { type: "warning" },
+      );
       return;
     }
 
@@ -317,9 +353,11 @@ export default function ScanMealScreen() {
       values.some((value) => !Number.isFinite(value) || value < 0) ||
       quantity <= 0
     ) {
-      Alert.alert(
+      showDialog(
         "Check nutrition values",
         "Enter a portion greater than zero and valid non-negative nutrition values.",
+        [{ text: "OK" }],
+        { type: "warning" },
       );
       return;
     }
@@ -346,16 +384,21 @@ export default function ScanMealScreen() {
 
     setNewFood({ ...emptyFood });
     setShowAddForm(false);
+    Keyboard.dismiss();
   };
 
   const saveMeal = async () => {
     if (!meal || meal.items.length === 0) {
-      Alert.alert(
+      showDialog(
         "Nothing to save",
         "Add at least one food item to your meal.",
+        [{ text: "OK" }],
+        { type: "warning" },
       );
       return;
     }
+
+    if (saving || analyzing) return;
 
     const invalidItem = meal.items.find(
       (item) =>
@@ -368,13 +411,16 @@ export default function ScanMealScreen() {
     );
 
     if (invalidItem) {
-      Alert.alert(
+      showDialog(
         "Check your food items",
         "Every item needs a name, a portion greater than zero, and valid nutrition values.",
+        [{ text: "OK" }],
+        { type: "warning" },
       );
       return;
     }
 
+    Keyboard.dismiss();
     setSaving(true);
     posthog.capture("ai_meal_save_started");
 
@@ -399,6 +445,7 @@ export default function ScanMealScreen() {
       if (!data?.success) {
         throw new Error(data?.error || "The meal could not be saved.");
       }
+
       Sentry.logger.info("AI meal saved successfully", {
         operation: "save_ai_meal",
       });
@@ -407,26 +454,23 @@ export default function ScanMealScreen() {
         source: "ai_scan",
       });
       posthog.capture("ai_meal_save_completed");
-      
-      Alert.alert(
+
+      showDialog(
         "Meal saved",
-        "Your scanned meal has been added to today’s food log.",
+        "Your scanned meal has been added to today's food log.",
         [
           {
             text: "Done",
             onPress: () => router.back(),
           },
         ],
+        { type: "success" },
       );
     } catch (error) {
-      console.error("Save meal error:", error);
-
       Sentry.logger.error("AI meal save failed", {
         operation: "save_ai_meal",
       });
-
       Sentry.captureException(error);
-
       posthog.capture("ai_meal_save_failed");
 
       const message =
@@ -434,7 +478,12 @@ export default function ScanMealScreen() {
           ? error.message
           : "Something went wrong while saving your meal.";
 
-      Alert.alert("Could not save meal", message);
+      showDialog(
+        "Could not save meal",
+        message,
+        [{ text: "OK" }],
+        { type: "error" },
+      );
     } finally {
       setSaving(false);
     }
@@ -443,11 +492,13 @@ export default function ScanMealScreen() {
   return (
     <KeyboardAvoidingView
       style={styles.screen}
-      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      behavior={Platform.OS === "ios" ? "padding" : "height"}
+      keyboardVerticalOffset={0}
     >
       <ScrollView
         contentContainerStyle={styles.container}
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.header}>
@@ -658,6 +709,7 @@ export default function ScanMealScreen() {
                   onChangeText={(value) => updateItem(index, "name", value)}
                   placeholder="Food name"
                   placeholderTextColor={C.muted}
+                  editable={!saving && !analyzing}
                 />
 
                 <Text style={styles.inputLabel}>PORTION SIZE</Text>
@@ -672,6 +724,7 @@ export default function ScanMealScreen() {
                     keyboardType="decimal-pad"
                     placeholder="Quantity"
                     placeholderTextColor={C.muted}
+                    editable={!saving && !analyzing}
                   />
 
                   <Text style={styles.unitBadge}>GRAMS</Text>
@@ -701,6 +754,7 @@ export default function ScanMealScreen() {
                         keyboardType="decimal-pad"
                         placeholder="0"
                         placeholderTextColor={C.muted}
+                        editable={!saving && !analyzing}
                       />
                     </View>
                   ))}
@@ -711,6 +765,7 @@ export default function ScanMealScreen() {
             <Pressable
               style={styles.addFoodButton}
               onPress={() => setShowAddForm((visible) => !visible)}
+              disabled={saving || analyzing}
             >
               <View style={styles.addFoodIcon}>
                 {showAddForm ? (
@@ -754,6 +809,7 @@ export default function ScanMealScreen() {
                   onChangeText={(value) => updateNewFood("name", value)}
                   placeholder="e.g. Chapati"
                   placeholderTextColor={C.muted}
+                  editable={!saving && !analyzing}
                 />
 
                 <Text style={styles.inputLabel}>QUANTITY (G) *</Text>
@@ -764,6 +820,7 @@ export default function ScanMealScreen() {
                   keyboardType="decimal-pad"
                   placeholder="100"
                   placeholderTextColor={C.muted}
+                  editable={!saving && !analyzing}
                 />
 
                 <View style={styles.nutritionGrid}>
@@ -774,7 +831,11 @@ export default function ScanMealScreen() {
                   {renderNutritionInput("Fiber (g) *", "fiber", "0")}
                 </View>
 
-                <Pressable style={styles.primaryButton} onPress={addFoodItem}>
+                <Pressable
+                  style={styles.primaryButton}
+                  onPress={addFoodItem}
+                  disabled={saving || analyzing}
+                >
                   <Plus size={18} color={C.bg} />
                   <Text style={styles.primaryButtonText}>Add to meal</Text>
                 </Pressable>
@@ -894,6 +955,7 @@ export default function ScanMealScreen() {
     </KeyboardAvoidingView>
   );
 }
+
 
 const C = {
   bg: "#101010",
@@ -1447,4 +1509,5 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     letterSpacing: 1.2,
   },
+
 });

@@ -1,8 +1,6 @@
-
 import { useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -19,6 +17,7 @@ import { usePostHog } from "posthog-react-native";
 
 import { supabase } from "../lib/supabase";
 import { Sentry } from "../lib/sentry";
+import { useAppDialog } from "../contexts/AppDialogContext";
 
 const C = {
   background: "#101010",
@@ -33,6 +32,7 @@ const C = {
 
 export default function ForgotPasswordScreen() {
   const posthog = usePostHog();
+  const { showDialog } = useAppDialog();
 
   const [email, setEmail] = useState("");
   const [loading, setLoading] = useState(false);
@@ -42,17 +42,21 @@ export default function ForgotPasswordScreen() {
     const cleanEmail = email.trim().toLowerCase();
 
     if (!cleanEmail) {
-      Alert.alert(
+      showDialog(
         "Missing email",
         "Please enter your email address.",
+        [{ text: "OK" }],
+        { type: "warning" },
       );
       return;
     }
 
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
-      Alert.alert(
+      showDialog(
         "Invalid email",
         "Please enter a valid email address.",
+        [{ text: "OK" }],
+        { type: "warning" },
       );
       return;
     }
@@ -69,9 +73,7 @@ export default function ForgotPasswordScreen() {
         const hostUri = Constants.expoConfig?.hostUri;
 
         if (!hostUri) {
-          throw new Error(
-            "Expo development server address not found.",
-          );
+          throw new Error("Expo development server address not found.");
         }
 
         redirectTo = `exp://${hostUri}/--/reset-password`;
@@ -82,9 +84,7 @@ export default function ForgotPasswordScreen() {
 
       const { error } = await supabase.auth.resetPasswordForEmail(
         cleanEmail,
-        {
-          redirectTo,
-        },
+        { redirectTo },
       );
 
       if (error) {
@@ -99,9 +99,11 @@ export default function ForgotPasswordScreen() {
           reason: "auth_error",
         });
 
-        Alert.alert(
+        showDialog(
           "Request failed",
           "We couldn't send the reset email. Please try again.",
+          [{ text: "OK" }],
+          { type: "error" },
         );
 
         return;
@@ -126,9 +128,11 @@ export default function ForgotPasswordScreen() {
         reason: "unexpected_error",
       });
 
-      Alert.alert(
+      showDialog(
         "Something went wrong",
         "Please try again.",
+        [{ text: "OK" }],
+        { type: "error" },
       );
     } finally {
       setLoading(false);
@@ -143,43 +147,32 @@ export default function ForgotPasswordScreen() {
       <ScrollView
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
         showsVerticalScrollIndicator={false}
       >
         <Pressable
           style={styles.backButton}
           onPress={() => router.back()}
           hitSlop={10}
+          disabled={loading}
         >
-          <Ionicons
-            name="arrow-back"
-            size={21}
-            color={C.text}
-          />
-
-          <Text style={styles.backText}>
-            Back to login
-          </Text>
+          <Ionicons name="arrow-back" size={21} color={C.text} />
+          <Text style={styles.backText}>Back to login</Text>
         </Pressable>
 
         <View style={styles.iconContainer}>
-          <Ionicons
-            name="lock-open-outline"
-            size={32}
-            color={C.accent}
-          />
+          <Ionicons name="lock-open-outline" size={32} color={C.accent} />
         </View>
 
-        <Text style={styles.eyebrow}>
-          ACCOUNT RECOVERY
-        </Text>
+        <Text style={styles.eyebrow}>ACCOUNT RECOVERY</Text>
 
         <Text style={styles.title}>
           Forgot your{"\n"}password?
         </Text>
 
         <Text style={styles.subtitle}>
-          Enter the email address associated with your BiteLog
-          account. We'll send you a link to reset your password.
+          Enter the email address associated with your BiteLog account. We'll
+          send you a link to reset your password.
         </Text>
 
         {submitted ? (
@@ -190,37 +183,26 @@ export default function ForgotPasswordScreen() {
               color={C.accent}
             />
 
-            <Text style={styles.successTitle}>
-              Check your inbox
-            </Text>
+            <Text style={styles.successTitle}>Check your inbox</Text>
 
             <Text style={styles.successText}>
-              If an account exists for that email address, you'll
-              receive a password reset link shortly. Check your
-              spam folder too.
+              If an account exists for that email address, you'll receive a
+              password reset link shortly. Check your spam folder too.
             </Text>
 
             <Pressable
               style={styles.button}
               onPress={() => router.replace("/login")}
             >
-              <Text style={styles.buttonText}>
-                Back to login
-              </Text>
+              <Text style={styles.buttonText}>Back to login</Text>
             </Pressable>
           </View>
         ) : (
           <View style={styles.form}>
-            <Text style={styles.label}>
-              Email address
-            </Text>
+            <Text style={styles.label}>Email address</Text>
 
             <View style={styles.inputContainer}>
-              <Ionicons
-                name="mail-outline"
-                size={19}
-                color={C.muted}
-              />
+              <Ionicons name="mail-outline" size={19} color={C.muted} />
 
               <TextInput
                 style={styles.input}
@@ -231,6 +213,8 @@ export default function ForgotPasswordScreen() {
                 autoCapitalize="none"
                 autoCorrect={false}
                 keyboardType="email-address"
+                textContentType="emailAddress"
+                autoComplete="email"
                 editable={!loading}
                 returnKeyType="send"
                 onSubmitEditing={handleResetRequest}
@@ -250,10 +234,7 @@ export default function ForgotPasswordScreen() {
                 <ActivityIndicator color={C.background} />
               ) : (
                 <>
-                  <Text style={styles.buttonText}>
-                    Send reset link
-                  </Text>
-
+                  <Text style={styles.buttonText}>Send reset link</Text>
                   <Ionicons
                     name="arrow-forward"
                     size={19}

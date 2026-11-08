@@ -1,11 +1,7 @@
 import { useCallback, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   FlatList,
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
   Pressable,
   RefreshControl,
   StyleSheet,
@@ -17,6 +13,8 @@ import { useFocusEffect, useRouter } from "expo-router";
 import { supabase } from "../../lib/supabase";
 import { usePostHog } from "posthog-react-native";
 import { Sentry } from "../../lib/sentry";
+import AppModal from "../../components/AppModal";
+import { useAppDialog } from "../../contexts/AppDialogContext";
 
 type Group = {
   id: string;
@@ -59,6 +57,7 @@ export default function FriendsScreen() {
 
   const router = useRouter();
   const posthog = usePostHog();
+  const { showDialog } = useAppDialog();
 
   const loadData = useCallback(
     async (showLoader = true) => {
@@ -108,17 +107,24 @@ export default function FriendsScreen() {
         setGroups(groupsResult.data ?? []);
         setInvitations(invitationResult.data ?? []);
       } catch (error) {
-        console.error("Error loading Friends screen:", error);
-        Alert.alert(
+        Sentry.logger.error("Friends screen data loading failed", {
+          operation: "friends_load",
+        });
+        Sentry.captureException(error);
+        posthog.capture("friends_load_failed");
+
+        showDialog(
           "Could not load Friends",
           error instanceof Error ? error.message : "Please try again.",
+          [{ text: "OK" }],
+          { type: "error" },
         );
       } finally {
         setLoading(false);
         setRefreshing(false);
       }
     },
-    [router],
+    [router, posthog, showDialog],
   );
 
   useFocusEffect(
@@ -132,12 +138,22 @@ export default function FriendsScreen() {
     const name = groupName.trim();
 
     if (!name) {
-      Alert.alert("Group name required", "Enter a name for your group.");
+      showDialog(
+        "Group name required",
+        "Enter a name for your group.",
+        [{ text: "Got it" }],
+        { type: "warning" },
+      );
       return;
     }
 
     if (name.length > 50) {
-      Alert.alert("Name too long", "Use 50 characters or fewer.");
+      showDialog(
+        "Name too long",
+        "Use 50 characters or fewer.",
+        [{ text: "Got it" }],
+        { type: "warning" },
+      );
       return;
     }
 
@@ -161,7 +177,12 @@ export default function FriendsScreen() {
       setModalVisible(false);
       await loadData();
 
-      Alert.alert("Group created!", `${name} is ready.`);
+      showDialog(
+        "Group created!",
+        `${name} is ready.`,
+        [{ text: "Continue" }],
+        { type: "success" },
+      );
     } catch (error) {
       Sentry.logger.error("Group creation failed", {
         operation: "create_group",
@@ -173,11 +194,11 @@ export default function FriendsScreen() {
         failure_stage: "create_group",
       });
 
-      console.error("Error creating group:", error);
-
-      Alert.alert(
+      showDialog(
         "Could not create group",
         error instanceof Error ? error.message : "Please try again.",
+        [{ text: "OK" }],
+        { type: "error" },
       );
     } finally {
       setCreating(false);
@@ -200,19 +221,30 @@ export default function FriendsScreen() {
 
       await loadData(false);
 
-      Alert.alert(
+      showDialog(
         response === "accepted"
           ? "Invitation accepted!"
           : "Invitation declined",
         response === "accepted"
           ? `You have joined ${invitation.group_name}.`
           : `You declined the invitation to ${invitation.group_name}.`,
+        [{ text: "Continue" }],
+        { type: response === "accepted" ? "success" : "info" },
       );
     } catch (error) {
-      console.error("Error responding to invitation:", error);
-      Alert.alert(
+      Sentry.logger.error("Group invitation response failed", {
+        operation: "respond_to_group_invitation",
+      });
+      Sentry.captureException(error);
+      posthog.capture("group_invitation_response_failed", {
+        response,
+      });
+
+      showDialog(
         "Could not update invitation",
         error instanceof Error ? error.message : "Please try again.",
+        [{ text: "OK" }],
+        { type: "error" },
       );
     } finally {
       setRespondingTo(null);
@@ -412,75 +444,64 @@ export default function FriendsScreen() {
         />
       )}
 
-      <Modal
+      <AppModal
         visible={modalVisible}
-        transparent
-        animationType="slide"
-        onRequestClose={() => {
+        onClose={() => {
           if (!creating) setModalVisible(false);
         }}
-      >
-        <KeyboardAvoidingView
-          style={styles.modalOverlay}
-          behavior={Platform.OS === "ios" ? "padding" : undefined}
-        >
-          <Pressable
-            style={styles.modalBackdrop}
-            onPress={() => {
-              if (!creating) setModalVisible(false);
-            }}
-          />
-
-          <View style={styles.modalContent}>
-            <View style={styles.modalHandle} />
-
-            <Text style={styles.modalEyebrow}>BUILD YOUR CIRCLE</Text>
-            <Text style={styles.modalTitle}>Create a group</Text>
-            <Text style={styles.modalDescription}>
-              Give your group a name. You’ll be its owner and can invite friends
-              next.
-            </Text>
-
-            <Text style={styles.inputLabel}>GROUP NAME</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="e.g. Fitness buddies"
-              placeholderTextColor={C.muted}
-              value={groupName}
-              onChangeText={setGroupName}
-              maxLength={50}
-              autoCapitalize="words"
-              autoCorrect={false}
-              returnKeyType="done"
-              onSubmitEditing={() => void handleCreateGroup()}
-              editable={!creating}
-              autoFocus
-            />
-
-            <Text style={styles.characterCount}>{groupName.length}/50</Text>
-
+        title="Create a group"
+        subtitle="Give your group a name. You’ll be its owner and can invite friends next."
+        presentation="bottom"
+        closeOnBackdropPress={!creating}
+        loading={creating}
+        footer={
+          <View style={styles.groupModalFooter}>
             <Pressable
-              style={[styles.submitButton, creating && styles.disabled]}
+              style={[
+                styles.groupSubmitButton,
+                creating && styles.disabled,
+              ]}
               onPress={() => void handleCreateGroup()}
               disabled={creating}
             >
               {creating ? (
                 <ActivityIndicator color={C.background} />
               ) : (
-                <Text style={styles.submitButtonText}>Create group</Text>
+                <Text style={styles.groupSubmitButtonText}>Create group</Text>
               )}
             </Pressable>
 
             <Pressable
-              style={styles.cancelButton}
+              style={styles.groupCancelButton}
               onPress={() => setModalVisible(false)}
               disabled={creating}
             >
-              <Text style={styles.cancelButtonText}>Cancel</Text>
+              <Text style={styles.groupCancelButtonText}>Cancel</Text>
             </Pressable>
           </View>
-        </KeyboardAvoidingView>
-      </Modal>
+        }
+      >
+        <Text style={styles.groupInputLabel}>GROUP NAME</Text>
+
+        <TextInput
+          style={styles.groupInput}
+          placeholder="e.g. Fitness buddies"
+          placeholderTextColor={C.muted}
+          value={groupName}
+          onChangeText={setGroupName}
+          maxLength={50}
+          autoCapitalize="words"
+          autoCorrect={false}
+          returnKeyType="done"
+          onSubmitEditing={() => void handleCreateGroup()}
+          editable={!creating}
+          autoFocus
+        />
+
+        <Text style={styles.groupCharacterCount}>
+          {groupName.length}/50
+        </Text>
+      </AppModal>
     </View>
   );
 }
@@ -780,94 +801,50 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: "900",
   },
-  modalOverlay: {
-    flex: 1,
-    justifyContent: "flex-end",
+  groupModalFooter: {
+    gap: 8,
   },
-  modalBackdrop: {
-    ...StyleSheet.absoluteFill,
-    backgroundColor: "rgba(0, 0, 0, 0.72)",
-  },
-  modalContent: {
-    backgroundColor: C.card,
-    paddingHorizontal: 24,
-    paddingTop: 12,
-    paddingBottom: Platform.OS === "ios" ? 34 : 24,
-    borderTopLeftRadius: 26,
-    borderTopRightRadius: 26,
-    borderWidth: 1,
-    borderColor: C.border,
-  },
-  modalHandle: {
-    width: 42,
-    height: 5,
-    borderRadius: 3,
-    backgroundColor: "#484848",
-    alignSelf: "center",
-    marginBottom: 22,
-  },
-  modalEyebrow: {
-    color: C.accent,
-    fontSize: 10,
-    fontWeight: "800",
-    letterSpacing: 1.7,
-    marginBottom: 7,
-  },
-  modalTitle: {
-    color: C.text,
-    fontSize: 24,
-    fontWeight: "900",
-  },
-  modalDescription: {
+  groupInputLabel: {
     color: C.secondary,
-    fontSize: 13,
-    lineHeight: 20,
-    marginTop: 8,
-    marginBottom: 24,
-  },
-  inputLabel: {
-    color: C.secondary,
-    fontSize: 10,
+    fontSize: 11,
     fontWeight: "800",
     letterSpacing: 1.2,
-    marginBottom: 9,
+    marginBottom: 10,
   },
-  input: {
-    height: 52,
+  groupInput: {
+    height: 54,
     paddingHorizontal: 15,
     borderWidth: 1,
     borderColor: C.border,
-    borderRadius: 12,
+    borderRadius: 13,
     fontSize: 14,
     color: C.text,
     backgroundColor: C.input,
   },
-  characterCount: {
+  groupCharacterCount: {
     alignSelf: "flex-end",
     color: C.muted,
     fontSize: 11,
     marginTop: 7,
   },
-  submitButton: {
-    height: 51,
+  groupSubmitButton: {
+    height: 52,
     borderRadius: 13,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: C.accent,
-    marginTop: 18,
   },
-  submitButtonText: {
+  groupSubmitButtonText: {
     color: C.background,
     fontSize: 14,
     fontWeight: "900",
   },
-  cancelButton: {
-    height: 46,
+  groupCancelButton: {
+    height: 44,
     alignItems: "center",
     justifyContent: "center",
-    marginTop: 6,
   },
-  cancelButtonText: {
+  groupCancelButtonText: {
     color: C.secondary,
     fontSize: 13,
     fontWeight: "700",
