@@ -68,120 +68,160 @@ export default function HomeScreen() {
     fiber: 0,
   });
   const [foodLogs, setFoodLogs] = useState<FoodLog[]>([]);
+  const hasLoadedRef = useRef(false);
+  const isLoadingRef = useRef(false);
 
-  const loadDashboard = async () => {
-    setLoading(true);
+  const loadDashboard = useCallback(
+    async (showLoader = !hasLoadedRef.current) => {
+      // Prevent duplicate requests.
+      if (isLoadingRef.current) return;
 
-    try {
-      const user = await getCurrentUser();
+      isLoadingRef.current = true;
 
-      if (!user) {
-        setLoading(false);
-        return;
+      // Only show the full-screen loader on the first load.
+      if (showLoader && !hasLoadedRef.current) {
+        setLoading(true);
       }
 
-      const complete = await isProfileComplete(user.id);
+      try {
+        const user = await getCurrentUser();
 
-      if (!complete) {
-        setLoading(false);
-        router.replace("/onboarding");
-        return;
-      }
-
-      const { data: goalData, error: goalError } = await supabase
-        .from("calorie_goals")
-        .select("daily_calories")
-        .eq("user_id", user.id)
-        .order("effective_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (goalError) {
-        console.error("Failed to load calorie goal:", goalError);
-      } else {
-        setDailyCalories(goalData ? Number(goalData.daily_calories) : null);
-      }
-
-      const now = new Date();
-      const year = now.getFullYear();
-      const month = String(now.getMonth() + 1).padStart(2, "0");
-      const day = String(now.getDate()).padStart(2, "0");
-      const today = `${year}-${month}-${day}`;
-
-      const { data: todaysFoodLogs, error: foodLogsError } = await supabase
-        .from("food_logs")
-        .select(
-          "id, food_name, quantity, unit, calories, protein, carbs, fat, fiber",
-        )
-        .eq("user_id", user.id)
-        .eq("log_date", today)
-        .order("created_at", { ascending: false });
-
-      if (foodLogsError) {
-        console.error("Failed to load food logs:", foodLogsError);
-        setFoodLogs([]);
-        setNutrition({
-          calories: 0,
-          protein: 0,
-          carbs: 0,
-          fat: 0,
-          fiber: 0,
-        });
-      } else {
-        setFoodLogs(
-          (todaysFoodLogs ?? []).map((food) => ({
-            id: food.id,
-            food_name: food.food_name,
-            quantity: Number(food.quantity ?? 0),
-            unit: food.unit ?? "g",
-            calories: Number(food.calories ?? 0),
-          })),
-        );
-
-        const totals = (todaysFoodLogs ?? []).reduce(
-          (sum, food) => ({
-            calories: sum.calories + Number(food.calories ?? 0),
-            protein: sum.protein + Number(food.protein ?? 0),
-            carbs: sum.carbs + Number(food.carbs ?? 0),
-            fat: sum.fat + Number(food.fat ?? 0),
-            fiber: sum.fiber + Number(food.fiber ?? 0),
-          }),
-          {
+        if (!user) {
+          setDailyCalories(null);
+          setFoodLogs([]);
+          setNutrition({
             calories: 0,
             protein: 0,
             carbs: 0,
             fat: 0,
             fiber: 0,
-          },
+          });
+          return;
+        }
+
+        const complete = await isProfileComplete(user.id);
+
+        if (!complete) {
+          router.replace("/onboarding");
+          return;
+        }
+
+        // Get today's date in local time.
+        const now = new Date();
+        const year = now.getFullYear();
+        const month = String(now.getMonth() + 1).padStart(2, "0");
+        const day = String(now.getDate()).padStart(2, "0");
+        const today = `${year}-${month}-${day}`;
+
+        // Fetch the goal and food logs simultaneously.
+        const [goalResult, foodLogsResult] = await Promise.all([
+          supabase
+            .from("calorie_goals")
+            .select("daily_calories")
+            .eq("user_id", user.id)
+            .order("effective_at", { ascending: false })
+            .limit(1)
+            .maybeSingle(),
+
+          supabase
+            .from("food_logs")
+            .select(
+              "id, food_name, quantity, unit, calories, protein, carbs, fat, fiber",
+            )
+            .eq("user_id", user.id)
+            .eq("log_date", today)
+            .order("created_at", { ascending: false }),
+        ]);
+
+        // Update calorie goal.
+        if (goalResult.error) {
+          Sentry.logger.error("Failed to load calorie goal", {
+            operation: "load_dashboard_goal",
+          });
+          Sentry.captureException(goalResult.error);
+        } else {
+          setDailyCalories(
+            goalResult.data ? Number(goalResult.data.daily_calories) : null,
+          );
+        }
+
+        // Update food logs and nutrition.
+        if (foodLogsResult.error) {
+          Sentry.logger.error("Failed to load dashboard food logs", {
+            operation: "load_dashboard_food_logs",
+          });
+
+          Sentry.captureException(foodLogsResult.error);
+
+          setFoodLogs([]);
+          setNutrition({
+            calories: 0,
+            protein: 0,
+            carbs: 0,
+            fat: 0,
+            fiber: 0,
+          });
+        } else {
+          const todaysFoodLogs = foodLogsResult.data ?? [];
+
+          setFoodLogs(
+            todaysFoodLogs.map((food) => ({
+              id: food.id,
+              food_name: food.food_name,
+              quantity: Number(food.quantity ?? 0),
+              unit: food.unit ?? "g",
+              calories: Number(food.calories ?? 0),
+            })),
+          );
+
+          const totals = todaysFoodLogs.reduce(
+            (sum, food) => ({
+              calories: sum.calories + Number(food.calories ?? 0),
+              protein: sum.protein + Number(food.protein ?? 0),
+              carbs: sum.carbs + Number(food.carbs ?? 0),
+              fat: sum.fat + Number(food.fat ?? 0),
+              fiber: sum.fiber + Number(food.fiber ?? 0),
+            }),
+            {
+              calories: 0,
+              protein: 0,
+              carbs: 0,
+              fat: 0,
+              fiber: 0,
+            },
+          );
+
+          setNutrition(totals);
+        }
+      } catch (error) {
+        Sentry.logger.error("Dashboard loading failed", {
+          operation: "load_dashboard",
+        });
+
+        Sentry.captureException(error);
+
+        posthog.capture("dashboard_load_failed");
+
+        showDialog(
+          "Could not load dashboard",
+          "Please try again.",
+          [{ text: "OK" }],
+          { type: "error" },
         );
-
-        setNutrition(totals);
+      } finally {
+        hasLoadedRef.current = true;
+        isLoadingRef.current = false;
+        setLoading(false);
       }
-    } catch (error) {
-      Sentry.logger.error("Dashboard loading failed", {
-        operation: "load_dashboard",
-      });
-
-      Sentry.captureException(error);
-
-      posthog.capture("dashboard_load_failed");
-
-      showDialog(
-        "Could not load dashboard",
-        "Please try again.",
-        [{ text: "OK" }],
-        { type: "error" },
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
+    },
+    [posthog, showDialog],
+  );
 
   useFocusEffect(
     useCallback(() => {
       posthog.capture("dashboard_viewed");
-      loadDashboard();
-    }, [posthog]),
+      void loadDashboard();
+    }, [loadDashboard, posthog]),
   );
 
   const deleteFoodLog = (foodLogId: string) => {
@@ -228,7 +268,7 @@ export default function HomeScreen() {
 
               posthog.capture("food_log_deleted");
 
-              await loadDashboard();
+              await loadDashboard(false);
             } catch (error) {
               Sentry.logger.error("Unexpected food log deletion error", {
                 operation: "delete_food_log",

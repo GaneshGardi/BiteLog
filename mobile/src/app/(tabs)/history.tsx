@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
   ActivityIndicator,
   ScrollView,
@@ -78,7 +78,7 @@ const formatNumber = (value: number) =>
 
 export default function HistoryScreen() {
   const posthog = usePostHog();
-  
+
   const [days, setDays] = useState<DaySummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [dailyGoal, setDailyGoal] = useState<number | null>(null);
@@ -87,8 +87,17 @@ export default function HistoryScreen() {
     "calories" | "protein" | "carbs" | "fat"
   >("calories");
 
+  const hasLoadedRef = useRef(false);
+  const isLoadingRef = useRef(false);
+
   const loadHistory = async () => {
-    setLoading(true);
+    if (isLoadingRef.current) return;
+
+    isLoadingRef.current = true;
+
+    if (!hasLoadedRef.current) {
+      setLoading(true);
+    }
 
     try {
       const user = await getCurrentUser();
@@ -119,29 +128,35 @@ export default function HistoryScreen() {
       const startDate = getDateString(dates[0]);
       const endDate = getDateString(dates[dates.length - 1]);
 
-      const { data: foodLogs, error: foodError } = await supabase
-        .from("food_logs")
-        .select(
-          "id, food_name, quantity, unit, calories, protein, carbs, fat, fiber, log_date",
-        )
-        .eq("user_id", user.id)
-        .gte("log_date", startDate)
-        .lte("log_date", endDate)
-        .order("log_date", { ascending: true });
+      // Fetch food logs and calorie goal simultaneously.
+      const [foodLogsResult, goalResult] = await Promise.all([
+        supabase
+          .from("food_logs")
+          .select(
+            "id, food_name, quantity, unit, calories, protein, carbs, fat, fiber, log_date",
+          )
+          .eq("user_id", user.id)
+          .gte("log_date", startDate)
+          .lte("log_date", endDate)
+          .order("log_date", { ascending: true }),
+
+        supabase
+          .from("calorie_goals")
+          .select("daily_calories")
+          .eq("user_id", user.id)
+          .order("effective_at", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+      ]);
+
+      const { data: foodLogs, error: foodError } = foodLogsResult;
+      const { data: goalData, error: goalError } = goalResult;
 
       if (foodError) {
         console.error("Failed to load history:", foodError);
         setDays([]);
         return;
       }
-
-      const { data: goalData, error: goalError } = await supabase
-        .from("calorie_goals")
-        .select("daily_calories")
-        .eq("user_id", user.id)
-        .order("effective_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
 
       if (goalError) {
         console.error("Failed to load calorie goal:", goalError);
@@ -174,10 +189,7 @@ export default function HistoryScreen() {
             (sum, food) => sum + Number(food.carbs || 0),
             0,
           ),
-          fat: dayLogs.reduce(
-            (sum, food) => sum + Number(food.fat || 0),
-            0,
-          ),
+          fat: dayLogs.reduce((sum, food) => sum + Number(food.fat || 0), 0),
           fiber: dayLogs.reduce(
             (sum, food) => sum + Number(food.fiber || 0),
             0,
@@ -190,6 +202,8 @@ export default function HistoryScreen() {
       console.error("Failed to load history:", error);
       setDays([]);
     } finally {
+      hasLoadedRef.current = true;
+      isLoadingRef.current = false;
       setLoading(false);
     }
   };
@@ -290,7 +304,9 @@ export default function HistoryScreen() {
         <Text style={styles.periodDates}>
           {formatDateLabel(days[0]?.date ?? getDateString(new Date()))}
           {" – "}
-          {formatDateLabel(days[days.length - 1]?.date ?? getDateString(new Date()))}
+          {formatDateLabel(
+            days[days.length - 1]?.date ?? getDateString(new Date()),
+          )}
         </Text>
       </View>
 
@@ -317,10 +333,7 @@ export default function HistoryScreen() {
                 {
                   width: `${
                     dailyGoal > 0
-                      ? Math.min(
-                          100,
-                          (averageCalories / dailyGoal) * 100,
-                        )
+                      ? Math.min(100, (averageCalories / dailyGoal) * 100)
                       : 0
                   }%`,
                 },
@@ -338,9 +351,7 @@ export default function HistoryScreen() {
         <View style={styles.sectionHeader}>
           <View>
             <Text style={styles.sectionTitle}>Your activity</Text>
-            <Text style={styles.sectionSubtitle}>
-              Track your daily intake
-            </Text>
+            <Text style={styles.sectionSubtitle}>Track your daily intake</Text>
           </View>
         </View>
 
@@ -354,10 +365,7 @@ export default function HistoryScreen() {
                   <Pressable
                     key={metric}
                     onPress={() => setSelectedMetric(metric)}
-                    style={[
-                      styles.metricTab,
-                      active && styles.metricTabActive,
-                    ]}
+                    style={[styles.metricTab, active && styles.metricTabActive]}
                   >
                     <Text
                       style={[
@@ -377,8 +385,7 @@ export default function HistoryScreen() {
             <Text style={styles.chartTotal}>
               {formatNumber(
                 days.reduce(
-                  (sum, day) =>
-                    sum + metricConfig[selectedMetric].value(day),
+                  (sum, day) => sum + metricConfig[selectedMetric].value(day),
                   0,
                 ),
               )}
@@ -436,10 +443,7 @@ export default function HistoryScreen() {
                   </View>
 
                   <Text
-                    style={[
-                      styles.barLabel,
-                      isToday && styles.todayBarLabel,
-                    ]}
+                    style={[styles.barLabel, isToday && styles.todayBarLabel]}
                   >
                     {day.label}
                   </Text>
@@ -471,10 +475,7 @@ export default function HistoryScreen() {
             <View style={styles.summaryCardTop}>
               <Text style={styles.summaryLabel}>Avg. calories</Text>
               <View
-                style={[
-                  styles.summaryDot,
-                  { backgroundColor: COLORS.accent },
-                ]}
+                style={[styles.summaryDot, { backgroundColor: COLORS.accent }]}
               />
             </View>
             <Text style={styles.summaryValue}>
@@ -487,10 +488,7 @@ export default function HistoryScreen() {
             <View style={styles.summaryCardTop}>
               <Text style={styles.summaryLabel}>Avg. protein</Text>
               <View
-                style={[
-                  styles.summaryDot,
-                  { backgroundColor: "#83B9FF" },
-                ]}
+                style={[styles.summaryDot, { backgroundColor: "#83B9FF" }]}
               />
             </View>
             <Text style={styles.summaryValue}>
@@ -504,10 +502,7 @@ export default function HistoryScreen() {
             <View style={styles.summaryCardTop}>
               <Text style={styles.summaryLabel}>Within goal</Text>
               <View
-                style={[
-                  styles.summaryDot,
-                  { backgroundColor: "#F6C76A" },
-                ]}
+                style={[styles.summaryDot, { backgroundColor: "#F6C76A" }]}
               />
             </View>
             <Text style={styles.summaryValue}>
@@ -521,10 +516,7 @@ export default function HistoryScreen() {
             <View style={styles.summaryCardTop}>
               <Text style={styles.summaryLabel}>Total calories</Text>
               <View
-                style={[
-                  styles.summaryDot,
-                  { backgroundColor: "#E7A0FF" },
-                ]}
+                style={[styles.summaryDot, { backgroundColor: "#E7A0FF" }]}
               />
             </View>
             <Text style={styles.summaryValue}>
@@ -576,9 +568,7 @@ export default function HistoryScreen() {
         >
           <View>
             <Text style={styles.sectionTitle}>Daily breakdown</Text>
-            <Text style={styles.sectionSubtitle}>
-              Calories logged each day
-            </Text>
+            <Text style={styles.sectionSubtitle}>Calories logged each day</Text>
           </View>
 
           <View style={styles.expandPill}>
@@ -600,10 +590,7 @@ export default function HistoryScreen() {
             return (
               <View
                 key={day.date}
-                style={[
-                  styles.dayCard,
-                  isToday && styles.todayCard,
-                ]}
+                style={[styles.dayCard, isToday && styles.todayCard]}
               >
                 <View style={styles.dayTopRow}>
                   <View style={styles.dayDateGroup}>
@@ -662,19 +649,31 @@ export default function HistoryScreen() {
 
                 <View style={styles.dayMacros}>
                   <Text style={styles.dayMacroText}>
-                    P <Text style={styles.dayMacroValue}>{formatNumber(day.protein)}g</Text>
+                    P{" "}
+                    <Text style={styles.dayMacroValue}>
+                      {formatNumber(day.protein)}g
+                    </Text>
                   </Text>
                   <Text style={styles.macroSeparator}>·</Text>
                   <Text style={styles.dayMacroText}>
-                    C <Text style={styles.dayMacroValue}>{formatNumber(day.carbs)}g</Text>
+                    C{" "}
+                    <Text style={styles.dayMacroValue}>
+                      {formatNumber(day.carbs)}g
+                    </Text>
                   </Text>
                   <Text style={styles.macroSeparator}>·</Text>
                   <Text style={styles.dayMacroText}>
-                    F <Text style={styles.dayMacroValue}>{formatNumber(day.fat)}g</Text>
+                    F{" "}
+                    <Text style={styles.dayMacroValue}>
+                      {formatNumber(day.fat)}g
+                    </Text>
                   </Text>
                   <Text style={styles.macroSeparator}>·</Text>
                   <Text style={styles.dayMacroText}>
-                    Fiber <Text style={styles.dayMacroValue}>{formatNumber(day.fiber)}g</Text>
+                    Fiber{" "}
+                    <Text style={styles.dayMacroValue}>
+                      {formatNumber(day.fiber)}g
+                    </Text>
                   </Text>
                 </View>
               </View>
@@ -683,9 +682,7 @@ export default function HistoryScreen() {
       </View>
 
       <View style={styles.footer}>
-        <Text style={styles.footerText}>
-          Small steps. Consistent progress.
-        </Text>
+        <Text style={styles.footerText}>Small steps. Consistent progress.</Text>
       </View>
     </ScrollView>
   );

@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
@@ -15,6 +15,7 @@ import { usePostHog } from "posthog-react-native";
 import { Sentry } from "../../lib/sentry";
 import AppModal from "../../components/AppModal";
 import { useAppDialog } from "../../contexts/AppDialogContext";
+import { getCurrentUser } from "../../lib/auth";
 
 type Group = {
   id: string;
@@ -55,21 +56,28 @@ export default function FriendsScreen() {
   const [groupName, setGroupName] = useState("");
   const [creating, setCreating] = useState(false);
 
+  const hasLoadedRef = useRef(false);
+  const isLoadingRef = useRef(false);
+
   const router = useRouter();
   const posthog = usePostHog();
   const { showDialog } = useAppDialog();
 
   const loadData = useCallback(
-    async (showLoader = true) => {
-      if (showLoader) setLoading(true);
+    async (showLoader = !hasLoadedRef.current) => {
+      if (isLoadingRef.current) {
+        setRefreshing(false);
+        return;
+      }
+
+      isLoadingRef.current = true;
+
+      if (showLoader && !hasLoadedRef.current) {
+        setLoading(true);
+      }
 
       try {
-        const {
-          data: { user },
-          error: authError,
-        } = await supabase.auth.getUser();
-
-        if (authError) throw authError;
+        const user = await getCurrentUser();
 
         if (!user) {
           setGroups([]);
@@ -78,11 +86,13 @@ export default function FriendsScreen() {
           return;
         }
 
+        // Fetch memberships and invitations simultaneously.
         const [membershipResult, invitationResult] = await Promise.all([
           supabase
             .from("group_members")
             .select("group_id")
             .eq("user_id", user.id),
+
           supabase.rpc("get_pending_group_invitations"),
         ]);
 
@@ -93,6 +103,7 @@ export default function FriendsScreen() {
           (membership) => membership.group_id,
         );
 
+        // Fetch groups only when memberships exist.
         const groupsResult =
           groupIds.length > 0
             ? await supabase
@@ -110,6 +121,7 @@ export default function FriendsScreen() {
         Sentry.logger.error("Friends screen data loading failed", {
           operation: "friends_load",
         });
+
         Sentry.captureException(error);
         posthog.capture("friends_load_failed");
 
@@ -120,19 +132,20 @@ export default function FriendsScreen() {
           { type: "error" },
         );
       } finally {
+        hasLoadedRef.current = true;
+        isLoadingRef.current = false;
         setLoading(false);
         setRefreshing(false);
       }
     },
     [router, posthog, showDialog],
   );
-
   useFocusEffect(
     useCallback(() => {
       posthog.capture("friends_viewed");
       void loadData();
     }, [loadData, posthog]),
-  );
+  );  
 
   const handleCreateGroup = async () => {
     const name = groupName.trim();
@@ -175,7 +188,7 @@ export default function FriendsScreen() {
 
       setGroupName("");
       setModalVisible(false);
-      await loadData();
+      await loadData(false);
 
       showDialog(
         "Group created!",
@@ -457,10 +470,7 @@ export default function FriendsScreen() {
         footer={
           <View style={styles.groupModalFooter}>
             <Pressable
-              style={[
-                styles.groupSubmitButton,
-                creating && styles.disabled,
-              ]}
+              style={[styles.groupSubmitButton, creating && styles.disabled]}
               onPress={() => void handleCreateGroup()}
               disabled={creating}
             >
@@ -498,9 +508,7 @@ export default function FriendsScreen() {
           autoFocus
         />
 
-        <Text style={styles.groupCharacterCount}>
-          {groupName.length}/50
-        </Text>
+        <Text style={styles.groupCharacterCount}>{groupName.length}/50</Text>
       </AppModal>
     </View>
   );

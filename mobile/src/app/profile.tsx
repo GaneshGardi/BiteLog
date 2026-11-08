@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -15,6 +15,7 @@ import { supabase } from "../lib/supabase";
 import { usePostHog } from "posthog-react-native";
 import { Sentry } from "../lib/sentry";
 import { useAppDialog } from "../contexts/AppDialogContext";
+import { getCurrentUser } from "../lib/auth";
 
 type Gender = "male" | "female" | "other" | "prefer_not_to_say";
 type Goal = "lose" | "maintain" | "gain";
@@ -78,83 +79,105 @@ export default function ProfileScreen() {
   const [savingCalories, setSavingCalories] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
 
-  const loadProfile = useCallback(async () => {
-    setLoading(true);
+  const hasLoadedRef = useRef(false);
+  const isLoadingRef = useRef(false);
 
-    try {
-      const {
-        data: { user },
-        error: authError,
-      } = await supabase.auth.getUser();
+  const loadProfile = useCallback(
+    async (showLoader = !hasLoadedRef.current) => {
+      if (isLoadingRef.current) return;
 
-      if (authError) throw authError;
+      isLoadingRef.current = true;
 
-      if (!user) {
-        router.replace("/login");
-        return;
+      if (showLoader && !hasLoadedRef.current) {
+        setLoading(true);
       }
 
-      setUserId(user.id);
-      setEmail(user.email ?? "");
+      try {
+        const user = await getCurrentUser();
 
-      const { data: profileData, error: profileError } = await supabase
-        .from("profiles")
-        .select(
-          "username, display_name, birth_date, gender, height_cm, weight_kg, goal",
-        )
-        .eq("id", user.id)
-        .maybeSingle();
+        if (!user) {
+          router.replace("/login");
+          return;
+        }
 
-      if (profileError) throw profileError;
+        setUserId(user.id);
+        setEmail(user.email ?? "");
 
-      if (profileData) {
-        setProfile({
-          username: profileData.username ?? "",
-          display_name: profileData.display_name ?? "",
-          birth_date: profileData.birth_date ?? "",
-          gender: profileData.gender ?? "",
-          height_cm:
-            profileData.height_cm != null ? String(profileData.height_cm) : "",
-          weight_kg:
-            profileData.weight_kg != null ? String(profileData.weight_kg) : "",
-          goal: profileData.goal ?? "",
+        // Fetch profile and calorie goal simultaneously.
+        const [profileResult, calorieResult] = await Promise.all([
+          supabase
+            .from("profiles")
+            .select(
+              "username, display_name, birth_date, gender, height_cm, weight_kg, goal",
+            )
+            .eq("id", user.id)
+            .maybeSingle(),
+
+          supabase
+            .from("calorie_goals")
+            .select("daily_calories")
+            .eq("user_id", user.id)
+            .order("effective_at", { ascending: false })
+            .limit(1)
+            .maybeSingle(),
+        ]);
+
+        if (profileResult.error) throw profileResult.error;
+        if (calorieResult.error) throw calorieResult.error;
+
+        const profileData = profileResult.data;
+
+        if (profileData) {
+          setProfile({
+            username: profileData.username ?? "",
+            display_name: profileData.display_name ?? "",
+            birth_date: profileData.birth_date ?? "",
+            gender: profileData.gender ?? "",
+            height_cm:
+              profileData.height_cm != null
+                ? String(profileData.height_cm)
+                : "",
+            weight_kg:
+              profileData.weight_kg != null
+                ? String(profileData.weight_kg)
+                : "",
+            goal: profileData.goal ?? "",
+          });
+        }
+
+        const calorieGoal = calorieResult.data;
+
+        if (calorieGoal?.daily_calories != null) {
+          const calories = Number(calorieGoal.daily_calories);
+
+          setSavedCalories(calories);
+          setDailyCalories(String(calories));
+        } else {
+          setSavedCalories(null);
+          setDailyCalories("");
+        }
+      } catch (error) {
+        Sentry.logger.error("Profile failed to load", {
+          operation: "load_profile",
         });
+
+        Sentry.captureException(error);
+        posthog.capture("profile_load_failed");
+
+        showDialog(
+          "Unable to load profile",
+          "Something went wrong while loading your profile. Please try again.",
+          [{ text: "OK" }],
+          { type: "error" },
+        );
+      } finally {
+        hasLoadedRef.current = true;
+        isLoadingRef.current = false;
+        setLoading(false);
       }
-
-      const { data: calorieGoal, error: calorieError } = await supabase
-        .from("calorie_goals")
-        .select("daily_calories")
-        .eq("user_id", user.id)
-        .order("effective_at", { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (calorieError) throw calorieError;
-
-      if (calorieGoal?.daily_calories != null) {
-        const calories = Number(calorieGoal.daily_calories);
-        setSavedCalories(calories);
-        setDailyCalories(String(calories));
-      }
-    } catch (error) {
-      Sentry.logger.error("Profile failed to load", {
-        operation: "load_profile",
-      });
-      Sentry.captureException(error);
-      posthog.capture("profile_load_failed");
-
-      showDialog(
-        "Unable to load profile",
-        error instanceof Error
-          ? error.message
-          : "Something went wrong while loading your profile.",
-        [{ text: "OK" }],
-        { type: "error" },
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, [posthog, showDialog]);
+    },
+    [posthog, showDialog],
+  );
 
   useEffect(() => {
     void loadProfile();
@@ -340,12 +363,9 @@ export default function ProfileScreen() {
           { type: "warning" },
         );
       } else {
-        showDialog(
-          "Could not save profile",
-          message,
-          [{ text: "OK" }],
-          { type: "error" },
-        );
+        showDialog("Could not save profile", message, [{ text: "OK" }], {
+          type: "error",
+        });
       }
     } finally {
       setSavingProfile(false);
@@ -832,9 +852,7 @@ export default function ProfileScreen() {
           </Pressable>
         </View>
 
-        <Text style={styles.footerText}>
-          BITELOG · YOUR JOURNEY, YOUR PACE
-        </Text>
+        <Text style={styles.footerText}>BITELOG · YOUR JOURNEY, YOUR PACE</Text>
       </ScrollView>
     </KeyboardAvoidingView>
   );

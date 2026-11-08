@@ -8,8 +8,12 @@ export default function TabsLayout() {
 
   return (
     <Tabs
+      detachInactiveScreens={false}
       screenOptions={{
         headerShown: false,
+
+        // Keep previously visited screens mounted.
+        freezeOnBlur: true,
 
         tabBarActiveTintColor: "#B6F36B",
         tabBarInactiveTintColor: "#777777",
@@ -18,11 +22,9 @@ export default function TabsLayout() {
           backgroundColor: "#151515",
           borderTopColor: "#303030",
           borderTopWidth: 1,
-
           height: 60 + insets.bottom,
           paddingTop: 7,
           paddingBottom: Math.max(insets.bottom, 8),
-
           elevation: 0,
         },
 
