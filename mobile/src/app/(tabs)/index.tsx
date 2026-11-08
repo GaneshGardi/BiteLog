@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator,
-  Alert,
   Animated,
   Pressable,
   ScrollView,
@@ -10,6 +9,7 @@ import {
   View,
 } from "react-native";
 import { router, useFocusEffect } from "expo-router";
+import { useAppDialog } from "../../contexts/AppDialogContext";
 import Svg, { Circle } from "react-native-svg";
 import {
   Apple,
@@ -56,6 +56,7 @@ type FoodLog = {
 
 export default function HomeScreen() {
   const posthog = usePostHog();
+  const { showDialog } = useAppDialog();
 
   const [loading, setLoading] = useState(true);
   const [dailyCalories, setDailyCalories] = useState<number | null>(null);
@@ -157,8 +158,20 @@ export default function HomeScreen() {
         setNutrition(totals);
       }
     } catch (error) {
-      console.error("Dashboard loading failed:", error);
-      Alert.alert("Could not load dashboard", "Please try again.");
+      Sentry.logger.error("Dashboard loading failed", {
+        operation: "load_dashboard",
+      });
+
+      Sentry.captureException(error);
+
+      posthog.capture("dashboard_load_failed");
+
+      showDialog(
+        "Could not load dashboard",
+        "Please try again.",
+        [{ text: "OK" }],
+        { type: "error" },
+      );
     } finally {
       setLoading(false);
     }
@@ -172,11 +185,14 @@ export default function HomeScreen() {
   );
 
   const deleteFoodLog = (foodLogId: string) => {
-    Alert.alert(
+    showDialog(
       "Delete food?",
       "Are you sure you want to remove this food entry?",
       [
-        { text: "Cancel", style: "cancel" },
+        {
+          text: "Cancel",
+          style: "cancel",
+        },
         {
           text: "Delete",
           style: "destructive",
@@ -196,9 +212,11 @@ export default function HomeScreen() {
 
                 posthog.capture("food_log_delete_failed");
 
-                Alert.alert(
+                showDialog(
                   "Delete failed",
                   "Could not delete this food entry. Please try again.",
+                  [{ text: "OK" }],
+                  { type: "error" },
                 );
 
                 return;
@@ -220,14 +238,17 @@ export default function HomeScreen() {
 
               posthog.capture("food_log_delete_failed");
 
-              Alert.alert(
+              showDialog(
                 "Delete failed",
                 "Could not delete this food entry. Please try again.",
+                [{ text: "OK" }],
+                { type: "error" },
               );
             }
           },
         },
       ],
+      { type: "confirmation" },
     );
   };
 
