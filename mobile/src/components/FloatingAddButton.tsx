@@ -9,7 +9,7 @@ import {
   useWindowDimensions,
   View,
 } from "react-native";
-import { router } from "expo-router";
+import { router, useFocusEffect } from "expo-router";
 import { ChevronRight, Plus, ScanLine, Search } from "lucide-react-native";
 import { usePostHog } from "posthog-react-native";
 
@@ -37,44 +37,51 @@ export default function FloatingAddButton({ bottomOffset }: Props) {
   const press = useRef(new Animated.Value(1)).current;
 
   // Ambient motion: gentle bob + soft pulse ring.
-  useEffect(() => {
-    const bob = Animated.loop(
-      Animated.sequence([
-        Animated.timing(float, {
-          toValue: 1,
-          duration: 1800,
-          easing: Easing.inOut(Easing.sin),
-          useNativeDriver: true,
-        }),
-        Animated.timing(float, {
-          toValue: 0,
-          duration: 1800,
-          easing: Easing.inOut(Easing.sin),
-          useNativeDriver: true,
-        }),
-      ]),
-    );
+  useFocusEffect(
+    useCallback(() => {
+      const bob = Animated.loop(
+        Animated.sequence([
+          Animated.timing(float, {
+            toValue: 1,
+            duration: 1800,
+            easing: Easing.inOut(Easing.sin),
+            useNativeDriver: true,
+          }),
+          Animated.timing(float, {
+            toValue: 0,
+            duration: 1800,
+            easing: Easing.inOut(Easing.sin),
+            useNativeDriver: true,
+          }),
+        ]),
+      );
 
-    const ring = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulse, {
-          toValue: 1,
-          duration: 1800,
-          easing: Easing.out(Easing.quad),
-          useNativeDriver: true,
-        }),
-        Animated.delay(900),
-        Animated.timing(pulse, { toValue: 0, duration: 0, useNativeDriver: true }),
-      ]),
-    );
+      const ring = Animated.loop(
+        Animated.sequence([
+          Animated.timing(pulse, {
+            toValue: 1,
+            duration: 1800,
+            easing: Easing.out(Easing.quad),
+            useNativeDriver: true,
+          }),
+          Animated.delay(900),
+          Animated.timing(pulse, {
+            toValue: 0,
+            duration: 0,
+            useNativeDriver: true,
+          }),
+        ]),
+      );
 
-    bob.start();
-    ring.start();
-    return () => {
-      bob.stop();
-      ring.stop();
-    };
-  }, [float, pulse]);
+      bob.start();
+      ring.start();
+
+      return () => {
+        bob.stop();
+        ring.stop();
+      };
+    }, [float, pulse]),
+  );
 
   const open = useCallback(() => {
     if (openRef.current) return;
@@ -170,7 +177,11 @@ export default function FloatingAddButton({ bottomOffset }: Props) {
     <>
       {mounted && (
         <Animated.View
-          style={[StyleSheet.absoluteFill, styles.backdrop, { opacity: backdrop }]}
+          style={[
+            StyleSheet.absoluteFill,
+            styles.backdrop,
+            { opacity: backdrop },
+          ]}
         >
           <Pressable
             style={StyleSheet.absoluteFill}
@@ -203,7 +214,12 @@ export default function FloatingAddButton({ bottomOffset }: Props) {
                 <Text style={[styles.optionTitle, { color: colors.onAccent }]}>
                   Scan with AI
                 </Text>
-                <Text style={[styles.optionSub, { color: colors.onAccent, opacity: 0.7 }]}>
+                <Text
+                  style={[
+                    styles.optionSub,
+                    { color: colors.onAccent, opacity: 0.7 },
+                  ]}
+                >
                   Snap a photo, we estimate it
                 </Text>
               </View>
@@ -211,9 +227,14 @@ export default function FloatingAddButton({ bottomOffset }: Props) {
             </Pressable>
           </Animated.View>
 
-          <Animated.View style={[{ width: menuWidth, marginTop: 10 }, itemStyle(0)]}>
+          <Animated.View
+            style={[{ width: menuWidth, marginTop: 10 }, itemStyle(0)]}
+          >
             <Pressable
-              style={({ pressed }) => [styles.option, pressed && styles.pressed]}
+              style={({ pressed }) => [
+                styles.option,
+                pressed && styles.pressed,
+              ]}
               onPress={() => go("/add-food", "manual")}
               accessibilityRole="button"
               accessibilityLabel="Add food manually"
@@ -223,7 +244,9 @@ export default function FloatingAddButton({ bottomOffset }: Props) {
               </View>
               <View style={styles.optionText}>
                 <Text style={styles.optionTitle}>Add manually</Text>
-                <Text style={styles.optionSub}>Search foods, enter portions</Text>
+                <Text style={styles.optionSub}>
+                  Search foods, enter portions
+                </Text>
               </View>
               <ChevronRight size={20} color={colors.muted} />
             </Pressable>

@@ -1,4 +1,3 @@
-
 import { Tabs } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -11,8 +10,6 @@ export default function TabsLayout() {
       detachInactiveScreens={false}
       screenOptions={{
         headerShown: false,
-
-        // Keep previously visited screens mounted.
         freezeOnBlur: true,
 
         tabBarActiveTintColor: "#B6F36B",
@@ -40,6 +37,7 @@ export default function TabsLayout() {
 
         sceneStyle: {
           backgroundColor: "#101010",
+          paddingTop: insets.top,
         },
       }}
     >

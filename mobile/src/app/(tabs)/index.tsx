@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useRef, useState, useEffect } from "react";
 import {
   ActivityIndicator,
   Animated,
@@ -9,21 +9,20 @@ import {
   View,
 } from "react-native";
 import { router, useFocusEffect } from "expo-router";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useAppDialog } from "../../contexts/AppDialogContext";
 import Svg, { Circle } from "react-native-svg";
 import {
   Apple,
-  Camera,
   ChevronRight,
   Flame,
   Leaf,
-  Plus,
-  ScanLine,
   Trash2,
   UserRound,
   Wheat,
   Beef,
   Droplets,
+  Trophy,
 } from "lucide-react-native";
 
 import { getCurrentUser, isProfileComplete } from "../../lib/auth";
@@ -31,7 +30,8 @@ import { supabase } from "../../lib/supabase";
 import { usePostHog } from "posthog-react-native";
 import { Sentry } from "../../lib/sentry";
 import HomeProgressCard from "../../components/HomeProgressCard";
-import PointsToast from "../../components/PointsToast";
+import FloatingAddButton from "../../components/FloatingAddButton";
+import { useReward } from "../../components/RewardContext";
 import {
   DAILY_POINT_CAP,
   fetchGamificationSummary,
@@ -64,6 +64,8 @@ type FoodLog = {
 export default function HomeScreen() {
   const posthog = usePostHog();
   const { showDialog } = useAppDialog();
+  const { showReward } = useReward();
+  const insets = useSafeAreaInsets();
 
   const [loading, setLoading] = useState(true);
   const [dailyCalories, setDailyCalories] = useState<number | null>(null);
@@ -78,81 +80,61 @@ export default function HomeScreen() {
   const [gamification, setGamification] = useState<GamificationSummary | null>(
     null,
   );
-  const [toast, setToast] = useState<{
-    id: number;
-    title: string;
-    subtitle: string;
-  } | null>(null);
   const lastPointsRef = useRef<{ date: string; points: number } | null>(null);
   const hasLoadedRef = useRef(false);
   const isLoadingRef = useRef(false);
 
   const loadDashboard = useCallback(
     async (showLoader = !hasLoadedRef.current) => {
-      // Prevent duplicate requests.
       if (isLoadingRef.current) return;
 
       isLoadingRef.current = true;
 
-      // Only show the full-screen loader on the first load.
       if (showLoader && !hasLoadedRef.current) {
         setLoading(true);
       }
 
       try {
         const user = await getCurrentUser();
-
         if (!user) {
-          setDailyCalories(null);
-          setFoodLogs([]);
-          setNutrition({
-            calories: 0,
-            protein: 0,
-            carbs: 0,
-            fat: 0,
-            fiber: 0,
-          });
+          router.replace("/login");
           return;
         }
 
         const complete = await isProfileComplete(user.id);
-
         if (!complete) {
           router.replace("/onboarding");
           return;
         }
 
-        // Get today's date in local time.
         const now = new Date();
         const year = now.getFullYear();
         const month = String(now.getMonth() + 1).padStart(2, "0");
         const day = String(now.getDate()).padStart(2, "0");
         const today = `${year}-${month}-${day}`;
 
-        // Fetch the goal and food logs simultaneously.
-        const [goalResult, foodLogsResult, gamificationSummary] = await Promise.all([
-          supabase
-            .from("calorie_goals")
-            .select("daily_calories")
-            .eq("user_id", user.id)
-            .order("effective_at", { ascending: false })
-            .limit(1)
-            .maybeSingle(),
+        const [goalResult, foodLogsResult, gamificationSummary] =
+          await Promise.all([
+            supabase
+              .from("calorie_goals")
+              .select("daily_calories")
+              .eq("user_id", user.id)
+              .order("effective_at", { ascending: false })
+              .limit(1)
+              .maybeSingle(),
 
-          supabase
-            .from("food_logs")
-            .select(
-              "id, food_name, quantity, unit, calories, protein, carbs, fat, fiber",
-            )
-            .eq("user_id", user.id)
-            .eq("log_date", today)
-            .order("created_at", { ascending: false }),
+            supabase
+              .from("food_logs")
+              .select(
+                "id, food_name, quantity, unit, calories, protein, carbs, fat, fiber",
+              )
+              .eq("user_id", user.id)
+              .eq("log_date", today)
+              .order("created_at", { ascending: false }),
 
-          // Never throws: returns null if gamification data is unavailable.
-          fetchGamificationSummary(user.id, today),
-        ]);
+            fetchGamificationSummary(user.id, today),
+          ]);
 
-        // Update calorie goal.
         if (goalResult.error) {
           Sentry.logger.error("Failed to load calorie goal", {
             operation: "load_dashboard_goal",
@@ -164,12 +146,10 @@ export default function HomeScreen() {
           );
         }
 
-        // Update food logs and nutrition.
         if (foodLogsResult.error) {
           Sentry.logger.error("Failed to load dashboard food logs", {
             operation: "load_dashboard_food_logs",
           });
-
           Sentry.captureException(foodLogsResult.error);
 
           setFoodLogs([]);
@@ -201,19 +181,13 @@ export default function HomeScreen() {
               fat: sum.fat + Number(food.fat ?? 0),
               fiber: sum.fiber + Number(food.fiber ?? 0),
             }),
-            {
-              calories: 0,
-              protein: 0,
-              carbs: 0,
-              fat: 0,
-              fiber: 0,
-            },
+            { calories: 0, protein: 0, carbs: 0, fat: 0, fiber: 0 },
           );
 
           setNutrition(totals);
         }
 
-        // Points, streak and group rank (optional; never blocks the dashboard).
+        // Points detection → show Winner.json reward badge (same logic as before)
         if (gamificationSummary) {
           setGamification(gamificationSummary);
 
@@ -226,13 +200,24 @@ export default function HomeScreen() {
           ) {
             const earned = gamificationSummary.todayPoints - previous.points;
 
-            setToast({
-              id: Date.now(),
-              title: `+${earned} pts`,
-              subtitle: gamificationSummary.qualifiedToday
-                ? "Day complete! Your streak grows."
-                : `${gamificationSummary.todayPoints}/${DAILY_POINT_CAP} points today`,
-            });
+            showReward(
+              {
+                total: earned,
+                lines: [
+                  {
+                    type: "food_logged",
+                    points: earned,
+                  },
+                ],
+                todayPoints: gamificationSummary.todayPoints,
+                currentStreak: gamificationSummary.currentStreak,
+              },
+              {
+                subtitle: gamificationSummary.qualifiedToday
+                  ? "Day complete! Your streak grows."
+                  : `${gamificationSummary.todayPoints}/${DAILY_POINT_CAP} points today`,
+              },
+            );
           }
 
           lastPointsRef.current = {
@@ -244,9 +229,7 @@ export default function HomeScreen() {
         Sentry.logger.error("Dashboard loading failed", {
           operation: "load_dashboard",
         });
-
         Sentry.captureException(error);
-
         posthog.capture("dashboard_load_failed");
 
         showDialog(
@@ -261,7 +244,7 @@ export default function HomeScreen() {
         setLoading(false);
       }
     },
-    [posthog, showDialog],
+    [posthog, showDialog, showReward],
   );
 
   useFocusEffect(
@@ -276,10 +259,7 @@ export default function HomeScreen() {
       "Delete food?",
       "Are you sure you want to remove this food entry?",
       [
-        {
-          text: "Cancel",
-          style: "cancel",
-        },
+        { text: "Cancel", style: "cancel" },
         {
           text: "Delete",
           style: "destructive",
@@ -294,9 +274,7 @@ export default function HomeScreen() {
                 Sentry.logger.error("Food log deletion failed", {
                   operation: "delete_food_log",
                 });
-
                 Sentry.captureException(error);
-
                 posthog.capture("food_log_delete_failed");
 
                 showDialog(
@@ -305,24 +283,19 @@ export default function HomeScreen() {
                   [{ text: "OK" }],
                   { type: "error" },
                 );
-
                 return;
               }
 
               Sentry.logger.info("Food log deleted", {
                 operation: "delete_food_log",
               });
-
               posthog.capture("food_log_deleted");
-
               await loadDashboard(false);
             } catch (error) {
               Sentry.logger.error("Unexpected food log deletion error", {
                 operation: "delete_food_log",
               });
-
               Sentry.captureException(error);
-
               posthog.capture("food_log_delete_failed");
 
               showDialog(
@@ -341,40 +314,43 @@ export default function HomeScreen() {
 
   if (loading) {
     return (
-      <View style={styles.loadingContainer}>
+      <View style={styles.center}>
         <ActivityIndicator size="large" color={ACCENT} />
-        <Text style={styles.loadingText}>Preparing your dashboard…</Text>
       </View>
     );
   }
 
-  const caloriesConsumed = Math.round(nutrition.calories);
-  const caloriesRemaining =
+  const caloriesConsumed = nutrition.calories;
+  const rawProgress =
+    dailyCalories && dailyCalories > 0
+      ? caloriesConsumed / dailyCalories
+      : 0;
+  const progress = Math.min(rawProgress, 1);
+  const overGoal =
+    dailyCalories !== null &&
+    dailyCalories > 0 &&
+    caloriesConsumed > dailyCalories;
+  const remaining =
     dailyCalories !== null
       ? Math.max(dailyCalories - caloriesConsumed, 0)
       : null;
 
-  const progress =
-    dailyCalories && dailyCalories > 0
-      ? Math.min(caloriesConsumed / dailyCalories, 1)
-      : 0;
-
-  const overGoal = dailyCalories !== null && caloriesConsumed > dailyCalories;
+  // Tab bar ~60 + safe area; keep FAB clear of it
+  const fabBottomOffset = 20;
 
   return (
-    <View style={styles.screen}>
+    <View style={styles.container}>
       <ScrollView
-        contentContainerStyle={styles.container}
+        contentContainerStyle={[styles.content, { paddingBottom: 120 }]}
         showsVerticalScrollIndicator={false}
       >
         {/* Header */}
-        <View style={styles.header}>
-          <View style={styles.headerText}>
+        <View style={styles.headerRow}>
+          <View style={{ flex: 1 }}>
             <Text style={styles.eyebrow}>YOUR DAILY FUEL</Text>
             <Text style={styles.title}>Let's make today count.</Text>
             <Text style={styles.subtitle}>Today's nutrition at a glance</Text>
           </View>
-
           <Pressable
             style={({ pressed }) => [
               styles.profileButton,
@@ -384,19 +360,21 @@ export default function HomeScreen() {
             accessibilityRole="button"
             accessibilityLabel="Open profile"
           >
-            <UserRound size={22} color={ACCENT} strokeWidth={1.8} />
+            <UserRound size={20} color={TEXT} />
           </Pressable>
         </View>
 
-        {/* Calories */}
+        {/* Daily calories card */}
         <View style={styles.calorieCard}>
-          <View style={styles.cardHeading}>
-            <View style={styles.headingIcon}>
-              <Flame size={18} color={ACCENT} />
+          <View style={styles.calorieCardHeader}>
+            <View style={styles.calorieTitleRow}>
+              <View style={styles.flameBadge}>
+                <Flame size={14} color={ACCENT} />
+              </View>
+              <Text style={styles.calorieTitle}>Daily calories</Text>
             </View>
-            <Text style={styles.cardHeadingText}>Daily calories</Text>
-            <View style={styles.todayBadge}>
-              <Text style={styles.todayBadgeText}>TODAY</Text>
+            <View style={styles.todayPill}>
+              <Text style={styles.todayPillText}>TODAY</Text>
             </View>
           </View>
 
@@ -413,7 +391,7 @@ export default function HomeScreen() {
 
             <View style={styles.calorieStats}>
               <Text style={styles.consumedCalories}>
-                {caloriesConsumed.toLocaleString("en-IN")}
+                {Math.round(caloriesConsumed).toLocaleString("en-IN")}
               </Text>
               <Text style={styles.smallLabel}>kcal consumed</Text>
 
@@ -421,7 +399,7 @@ export default function HomeScreen() {
 
               <Text style={styles.goalValue}>
                 {dailyCalories !== null
-                  ? `${dailyCalories.toLocaleString("en-IN")} kcal`
+                  ? `${Math.round(dailyCalories).toLocaleString("en-IN")} kcal`
                   : "Not set"}
               </Text>
               <Text style={styles.smallLabel}>daily goal</Text>
@@ -432,26 +410,24 @@ export default function HomeScreen() {
             <View style={styles.remainingIcon}>
               <Flame size={16} color={overGoal ? "#FF9A76" : ACCENT} />
             </View>
-            <View style={styles.remainingTextContainer}>
+            <View style={{ flex: 1 }}>
               <Text style={styles.remainingTitle}>
-                {dailyCalories === null
-                  ? "Set a daily calorie goal"
-                  : overGoal
-                    ? "Daily goal reached"
-                    : `${caloriesRemaining?.toLocaleString("en-IN")} kcal left`}
+                {overGoal
+                  ? `${Math.round(caloriesConsumed - (dailyCalories ?? 0)).toLocaleString("en-IN")} kcal over`
+                  : remaining !== null
+                    ? `${Math.round(remaining).toLocaleString("en-IN")} kcal left`
+                    : "Set a daily goal"}
               </Text>
-              <Text style={styles.remainingSubtitle}>
-                {dailyCalories === null
-                  ? "Set your target to track your progress."
-                  : overGoal
-                    ? "You've gone over your daily target."
-                    : "Keep tracking to stay on top of your goal."}
+              <Text style={styles.remainingSub}>
+                {overGoal
+                  ? "You're above target — balance the rest of the day."
+                  : "Keep tracking to stay on top of your goal."}
               </Text>
             </View>
           </View>
         </View>
 
-        {/* Points, streak and group rank */}
+        {/* Week / points strip */}
         {gamification && <HomeProgressCard summary={gamification} />}
 
         {/* Macros */}
@@ -460,7 +436,7 @@ export default function HomeScreen() {
             <Text style={styles.sectionTitle}>Your macros</Text>
             <Text style={styles.sectionSubtitle}>Nutrients logged today</Text>
           </View>
-          <Leaf size={20} color={ACCENT} />
+          <Leaf size={18} color={ACCENT} />
         </View>
 
         <View style={styles.macroGrid}>
@@ -486,57 +462,7 @@ export default function HomeScreen() {
           />
         </View>
 
-        {/* Actions */}
-        <View style={styles.sectionHeader}>
-          <View>
-            <Text style={styles.sectionTitle}>Log your food</Text>
-            <Text style={styles.sectionSubtitle}>
-              Choose how you'd like to add a meal
-            </Text>
-          </View>
-        </View>
-
-        <Pressable
-          style={({ pressed }) => [
-            styles.primaryAction,
-            pressed && styles.pressed,
-          ]}
-          onPress={() => router.push("/add-food")}
-          accessibilityRole="button"
-        >
-          <View style={styles.primaryActionIcon}>
-            <Plus size={23} color={BG} strokeWidth={2.5} />
-          </View>
-          <View style={styles.actionText}>
-            <Text style={styles.primaryActionTitle}>Add food</Text>
-            <Text style={styles.primaryActionSubtitle}>
-              Search foods and enter portions
-            </Text>
-          </View>
-          <ChevronRight size={21} color={BG} />
-        </Pressable>
-
-        <Pressable
-          style={({ pressed }) => [
-            styles.secondaryAction,
-            pressed && styles.pressed,
-          ]}
-          onPress={() => router.push("/scan-meal")}
-          accessibilityRole="button"
-        >
-          <View style={styles.secondaryActionIcon}>
-            <ScanLine size={22} color={ACCENT} />
-          </View>
-          <View style={styles.actionText}>
-            <Text style={styles.secondaryActionTitle}>Scan meal with AI</Text>
-            <Text style={styles.secondaryActionSubtitle}>
-              Estimate nutrition from a photo
-            </Text>
-          </View>
-          <Camera size={19} color={MUTED} />
-        </Pressable>
-
-        {/* Food log */}
+        {/* Today's food */}
         <View style={styles.sectionHeader}>
           <View>
             <Text style={styles.sectionTitle}>Today's food</Text>
@@ -554,64 +480,51 @@ export default function HomeScreen() {
         {foodLogs.length === 0 ? (
           <View style={styles.emptyFoodCard}>
             <View style={styles.emptyIcon}>
-              <Apple size={24} color={ACCENT} />
+              <Leaf size={22} color={ACCENT} />
             </View>
-            <Text style={styles.emptyFoodTitle}>Nothing logged yet</Text>
+            <Text style={styles.emptyFoodTitle}>No food logged yet</Text>
             <Text style={styles.emptyFoodText}>
-              Your meals will show up here when you add them.
+              Tap the + button below to scan a meal or add food manually.
             </Text>
-            <Pressable
-              style={({ pressed }) => [
-                styles.emptyAction,
-                pressed && styles.pressed,
-              ]}
-              onPress={() => router.push("/add-food")}
-            >
-              <Text style={styles.emptyActionText}>Log your first meal</Text>
-              <ChevronRight size={16} color={ACCENT} />
-            </Pressable>
           </View>
         ) : (
           <View style={styles.foodList}>
-            {foodLogs.map((food, index) => (
+            {foodLogs.map((item, index) => (
               <View
-                key={food.id}
+                key={item.id}
                 style={[
                   styles.foodRow,
                   index === foodLogs.length - 1 && styles.lastFoodRow,
                 ]}
               >
                 <View style={styles.foodIcon}>
-                  <Apple size={19} color={ACCENT} />
+                  <Leaf size={16} color={ACCENT} />
                 </View>
-
                 <View style={styles.foodInfo}>
-                  <Text style={styles.foodName} numberOfLines={2}>
-                    {food.food_name}
+                  <Text style={styles.foodName} numberOfLines={1}>
+                    {item.food_name}
                   </Text>
                   <Text style={styles.foodQuantity}>
-                    {food.quantity} {food.unit}
+                    {item.quantity}
+                    {item.unit}
                   </Text>
                 </View>
-
                 <View style={styles.foodActions}>
                   <Text style={styles.foodCalories}>
-                    {Math.round(food.calories).toLocaleString("en-IN")}
+                    {Math.round(item.calories)}
                   </Text>
                   <Text style={styles.kcalLabel}>kcal</Text>
                 </View>
-
                 <Pressable
                   style={({ pressed }) => [
                     styles.deleteButton,
                     pressed && styles.pressed,
                   ]}
-                  onPress={() => deleteFoodLog(food.id)}
+                  onPress={() => deleteFoodLog(item.id)}
                   accessibilityRole="button"
-                  accessibilityLabel={`Delete ${food.food_name}`}
-                  hitSlop={8}
+                  accessibilityLabel={`Delete ${item.food_name}`}
                 >
-                  <Trash2 size={17} color="#FF8585" />
+                  <Trash2 size={15} color="#FF8A8A" />
                 </Pressable>
               </View>
             ))}
@@ -623,17 +536,15 @@ export default function HomeScreen() {
         </Text>
       </ScrollView>
 
-      {toast && (
-        <PointsToast
-          toastId={toast.id}
-          title={toast.title}
-          subtitle={toast.subtitle}
-          onDone={() => setToast(null)}
-        />
-      )}
+      {/* Floating add button — always visible, bottom center */}
+      <FloatingAddButton bottomOffset={fabBottomOffset} />
     </View>
   );
 }
+
+/* ------------------------------------------------------------------ */
+/* Small presentational helpers                                         */
+/* ------------------------------------------------------------------ */
 
 type CalorieRingProps = {
   progress: number;
@@ -642,9 +553,9 @@ type CalorieRingProps = {
 };
 
 function CalorieRing({ progress, overGoal, children }: CalorieRingProps) {
-  const size = 142;
-  const strokeWidth = 10;
-  const radius = (size - strokeWidth) / 2;
+  const size = 118;
+  const stroke = 10;
+  const radius = (size - stroke) / 2;
   const circumference = 2 * Math.PI * radius;
   const animatedProgress = useRef(new Animated.Value(0)).current;
   const AnimatedCircle = Animated.createAnimatedComponent(Circle);
@@ -657,7 +568,6 @@ function CalorieRing({ progress, overGoal, children }: CalorieRingProps) {
     });
 
     animation.start();
-
     return () => animation.stop();
   }, [progress, animatedProgress]);
 
@@ -667,14 +577,21 @@ function CalorieRing({ progress, overGoal, children }: CalorieRingProps) {
   });
 
   return (
-    <View style={styles.ringContainer}>
-      <Svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+    <View
+      style={{
+        width: size,
+        height: size,
+        alignItems: "center",
+        justifyContent: "center",
+      }}
+    >
+      <Svg width={size} height={size} style={{ position: "absolute" }}>
         <Circle
           cx={size / 2}
           cy={size / 2}
           r={radius}
-          stroke="#343434"
-          strokeWidth={strokeWidth}
+          stroke={BORDER}
+          strokeWidth={stroke}
           fill="none"
         />
         <AnimatedCircle
@@ -682,16 +599,16 @@ function CalorieRing({ progress, overGoal, children }: CalorieRingProps) {
           cy={size / 2}
           r={radius}
           stroke={overGoal ? "#FF9A76" : ACCENT}
-          strokeWidth={strokeWidth}
-          strokeLinecap="round"
+          strokeWidth={stroke}
           fill="none"
-          strokeDasharray={circumference}
+          strokeDasharray={`${circumference} ${circumference}`}
           strokeDashoffset={strokeDashoffset}
+          strokeLinecap="round"
           rotation="-90"
           origin={`${size / 2}, ${size / 2}`}
         />
       </Svg>
-      <View style={styles.ringCenter}>{children}</View>
+      <View style={{ alignItems: "center" }}>{children}</View>
     </View>
   );
 }
@@ -705,62 +622,57 @@ type MacroCardProps = {
 function MacroCard({ label, value, icon }: MacroCardProps) {
   return (
     <View style={styles.macroCard}>
-      <View style={styles.macroCardTop}>
-        <View style={styles.macroIcon}>{icon}</View>
-        <Text style={styles.macroLabel}>{label}</Text>
-      </View>
+      <View style={styles.macroIcon}>{icon}</View>
+      <Text style={styles.macroLabel}>{label}</Text>
       <Text style={styles.macroValue}>
-        {Number(value).toFixed(1)}
+        {value.toFixed(1)}
         <Text style={styles.macroUnit}> g</Text>
       </Text>
-      <View style={styles.macroAccent} />
+      <View style={styles.macroBarTrack}>
+        <View
+          style={[
+            styles.macroBarFill,
+            { width: `${Math.min((value / 80) * 100, 100)}%` },
+          ]}
+        />
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  screen: {
+  container: {
     flex: 1,
     backgroundColor: BG,
   },
-  loadingContainer: {
+  center: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: BG,
   },
-  loadingText: {
-    color: MUTED,
-    fontSize: 13,
-    marginTop: 14,
-  },
-  container: {
-    paddingTop: 62,
+  content: {
     paddingHorizontal: 20,
-    paddingBottom: 44,
+    paddingTop: 18,
   },
-  header: {
+  headerRow: {
     flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    marginBottom: 26,
+    alignItems: "flex-start",
+    marginBottom: 22,
     gap: 12,
-  },
-  headerText: {
-    flex: 1,
   },
   eyebrow: {
     fontSize: 11,
     fontWeight: "800",
-    letterSpacing: 2,
+    letterSpacing: 1.4,
     color: ACCENT,
+    marginBottom: 6,
   },
   title: {
-    marginTop: 8,
-    fontSize: 27,
-    lineHeight: 33,
-    fontWeight: "800",
+    fontSize: 26,
+    fontWeight: "900",
     color: TEXT,
+    letterSpacing: -0.4,
   },
   subtitle: {
     marginTop: 6,
@@ -768,52 +680,55 @@ const styles = StyleSheet.create({
     color: MUTED,
   },
   profileButton: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
+    width: 42,
+    height: 42,
+    borderRadius: 21,
     backgroundColor: CARD,
     borderWidth: 1,
     borderColor: BORDER,
     alignItems: "center",
     justifyContent: "center",
-  },
-  pressed: {
-    opacity: 0.78,
   },
   calorieCard: {
-    padding: 20,
-    borderRadius: 24,
     backgroundColor: CARD,
+    borderRadius: 24,
     borderWidth: 1,
     borderColor: BORDER,
+    padding: 18,
+    marginBottom: 16,
   },
-  cardHeading: {
+  calorieCardHeader: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 9,
+    justifyContent: "space-between",
+    marginBottom: 18,
   },
-  headingIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 11,
+  calorieTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  flameBadge: {
+    width: 28,
+    height: 28,
+    borderRadius: 10,
     backgroundColor: "#29351F",
     alignItems: "center",
     justifyContent: "center",
   },
-  cardHeadingText: {
-    flex: 1,
+  calorieTitle: {
     fontSize: 15,
-    fontWeight: "700",
+    fontWeight: "800",
     color: TEXT,
   },
-  todayBadge: {
+  todayPill: {
     backgroundColor: "#29351F",
-    borderRadius: 8,
-    paddingHorizontal: 9,
+    paddingHorizontal: 10,
     paddingVertical: 5,
+    borderRadius: 999,
   },
-  todayBadgeText: {
-    fontSize: 9,
+  todayPillText: {
+    fontSize: 10,
     fontWeight: "800",
     letterSpacing: 1,
     color: ACCENT,
@@ -821,214 +736,136 @@ const styles = StyleSheet.create({
   calorieContent: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12,
-    marginTop: 22,
-    marginBottom: 20,
-  },
-  ringContainer: {
-    width: 142,
-    height: 142,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  ringCenter: {
-    ...StyleSheet.absoluteFill,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  ringPercent: {
-    fontSize: 27,
-    fontWeight: "800",
-    color: TEXT,
-  },
-  ringCaption: {
-    fontSize: 12,
-    color: MUTED,
-    marginTop: 2,
+    gap: 18,
   },
   calorieStats: {
     flex: 1,
-    alignItems: "flex-start",
-    paddingLeft: 4,
   },
   consumedCalories: {
-    fontSize: 32,
-    fontWeight: "800",
+    fontSize: 34,
+    fontWeight: "900",
     color: TEXT,
     letterSpacing: -1,
+  },
+  goalValue: {
+    fontSize: 18,
+    fontWeight: "800",
+    color: TEXT,
   },
   smallLabel: {
     fontSize: 12,
     color: MUTED,
-    marginTop: 3,
+    marginTop: 2,
   },
   statDivider: {
-    width: "100%",
     height: 1,
     backgroundColor: BORDER,
-    marginVertical: 13,
+    marginVertical: 10,
   },
-  goalValue: {
-    color: "#DADADA",
-    fontSize: 17,
-    fontWeight: "700",
+  ringPercent: {
+    fontSize: 22,
+    fontWeight: "900",
+    color: TEXT,
+  },
+  ringCaption: {
+    fontSize: 11,
+    color: MUTED,
+    marginTop: 2,
   },
   remainingPanel: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 11,
-    padding: 13,
-    borderRadius: 14,
-    backgroundColor: "#22291D",
+    gap: 12,
+    marginTop: 18,
+    padding: 14,
+    borderRadius: 16,
+    backgroundColor: "#29351F",
   },
   remainingIcon: {
     width: 34,
     height: 34,
-    borderRadius: 11,
-    backgroundColor: "#303D26",
+    borderRadius: 12,
+    backgroundColor: "rgba(182,243,107,0.15)",
     alignItems: "center",
     justifyContent: "center",
-  },
-  remainingTextContainer: {
-    flex: 1,
   },
   remainingTitle: {
     fontSize: 14,
     fontWeight: "800",
     color: TEXT,
   },
-  remainingSubtitle: {
-    marginTop: 4,
-    fontSize: 11,
-    lineHeight: 16,
-    color: "#B7B7B7",
+  remainingSub: {
+    marginTop: 3,
+    fontSize: 12,
+    color: MUTED,
   },
   sectionHeader: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginTop: 30,
+    marginTop: 10,
     marginBottom: 14,
   },
   sectionTitle: {
-    fontSize: 19,
+    fontSize: 18,
     fontWeight: "800",
     color: TEXT,
   },
   sectionSubtitle: {
-    marginTop: 5,
+    marginTop: 3,
     fontSize: 12,
     color: MUTED,
   },
   macroGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
-    gap: 12,
+    gap: 10,
+    marginBottom: 8,
   },
   macroCard: {
-    width: "47%",
-    flexGrow: 1,
-    minHeight: 126,
-    padding: 15,
-    borderRadius: 17,
+    width: "47.5%",
     backgroundColor: CARD,
+    borderRadius: 18,
     borderWidth: 1,
     borderColor: BORDER,
-  },
-  macroCardTop: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
+    padding: 14,
   },
   macroIcon: {
-    width: 30,
-    height: 30,
-    borderRadius: 10,
+    width: 34,
+    height: 34,
+    borderRadius: 12,
     backgroundColor: "#29351F",
     alignItems: "center",
     justifyContent: "center",
+    marginBottom: 10,
   },
   macroLabel: {
     fontSize: 13,
-    fontWeight: "600",
-    color: "#C5C5C5",
+    fontWeight: "700",
+    color: MUTED,
   },
   macroValue: {
-    marginTop: 15,
-    fontSize: 25,
-    fontWeight: "800",
+    marginTop: 4,
+    fontSize: 22,
+    fontWeight: "900",
     color: TEXT,
   },
   macroUnit: {
     fontSize: 13,
-    fontWeight: "500",
+    fontWeight: "600",
     color: MUTED,
   },
-  macroAccent: {
-    width: 28,
-    height: 3,
-    borderRadius: 2,
-    backgroundColor: ACCENT,
-    marginTop: 11,
-  },
-  primaryAction: {
-    flexDirection: "row",
-    alignItems: "center",
-    padding: 16,
-    borderRadius: 17,
-    backgroundColor: ACCENT,
-    gap: 12,
-  },
-  primaryActionIcon: {
-    width: 43,
-    height: 43,
-    borderRadius: 14,
-    backgroundColor: "#D0FFA0",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  actionText: {
-    flex: 1,
-  },
-  primaryActionTitle: {
-    fontSize: 16,
-    fontWeight: "800",
-    color: BG,
-  },
-  primaryActionSubtitle: {
-    fontSize: 12,
-    color: "#344326",
-    marginTop: 4,
-  },
-  secondaryAction: {
-    flexDirection: "row",
-    alignItems: "center",
-    padding: 15,
-    borderRadius: 17,
-    backgroundColor: CARD,
-    borderWidth: 1,
-    borderColor: BORDER,
-    gap: 12,
+  macroBarTrack: {
     marginTop: 10,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: BORDER,
+    overflow: "hidden",
   },
-  secondaryActionIcon: {
-    width: 43,
-    height: 43,
-    borderRadius: 14,
-    backgroundColor: "#29351F",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  secondaryActionTitle: {
-    fontSize: 15,
-    fontWeight: "800",
-    color: TEXT,
-  },
-  secondaryActionSubtitle: {
-    fontSize: 12,
-    color: MUTED,
-    marginTop: 4,
+  macroBarFill: {
+    height: "100%",
+    backgroundColor: ACCENT,
+    borderRadius: 2,
   },
   foodCountBadge: {
     minWidth: 31,
@@ -1046,7 +883,7 @@ const styles = StyleSheet.create({
   },
   emptyFoodCard: {
     alignItems: "center",
-    padding: 24,
+    padding: 28,
     borderRadius: 18,
     backgroundColor: CARD,
     borderWidth: 1,
@@ -1072,18 +909,7 @@ const styles = StyleSheet.create({
     color: MUTED,
     textAlign: "center",
     lineHeight: 19,
-  },
-  emptyAction: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 5,
-    marginTop: 17,
-    padding: 9,
-  },
-  emptyActionText: {
-    color: ACCENT,
-    fontSize: 13,
-    fontWeight: "700",
+    paddingHorizontal: 12,
   },
   foodList: {
     backgroundColor: CARD,
@@ -1127,6 +953,7 @@ const styles = StyleSheet.create({
   },
   foodActions: {
     alignItems: "flex-end",
+    minWidth: 48,
   },
   foodCalories: {
     fontSize: 14,
@@ -1147,10 +974,13 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   footerText: {
-    marginTop: 30,
+    marginTop: 28,
     textAlign: "center",
     fontSize: 12,
     color: "#686868",
     letterSpacing: 0.3,
+  },
+  pressed: {
+    opacity: 0.75,
   },
 });
