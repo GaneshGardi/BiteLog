@@ -30,6 +30,13 @@ import { getCurrentUser, isProfileComplete } from "../../lib/auth";
 import { supabase } from "../../lib/supabase";
 import { usePostHog } from "posthog-react-native";
 import { Sentry } from "../../lib/sentry";
+import HomeProgressCard from "../../components/HomeProgressCard";
+import PointsToast from "../../components/PointsToast";
+import {
+  DAILY_POINT_CAP,
+  fetchGamificationSummary,
+  type GamificationSummary,
+} from "../../lib/gamification";
 
 const BG = "#101010";
 const CARD = "#1A1A1A";
@@ -68,6 +75,15 @@ export default function HomeScreen() {
     fiber: 0,
   });
   const [foodLogs, setFoodLogs] = useState<FoodLog[]>([]);
+  const [gamification, setGamification] = useState<GamificationSummary | null>(
+    null,
+  );
+  const [toast, setToast] = useState<{
+    id: number;
+    title: string;
+    subtitle: string;
+  } | null>(null);
+  const lastPointsRef = useRef<{ date: string; points: number } | null>(null);
   const hasLoadedRef = useRef(false);
   const isLoadingRef = useRef(false);
 
@@ -114,7 +130,7 @@ export default function HomeScreen() {
         const today = `${year}-${month}-${day}`;
 
         // Fetch the goal and food logs simultaneously.
-        const [goalResult, foodLogsResult] = await Promise.all([
+        const [goalResult, foodLogsResult, gamificationSummary] = await Promise.all([
           supabase
             .from("calorie_goals")
             .select("daily_calories")
@@ -131,6 +147,9 @@ export default function HomeScreen() {
             .eq("user_id", user.id)
             .eq("log_date", today)
             .order("created_at", { ascending: false }),
+
+          // Never throws: returns null if gamification data is unavailable.
+          fetchGamificationSummary(user.id, today),
         ]);
 
         // Update calorie goal.
@@ -192,6 +211,34 @@ export default function HomeScreen() {
           );
 
           setNutrition(totals);
+        }
+
+        // Points, streak and group rank (optional; never blocks the dashboard).
+        if (gamificationSummary) {
+          setGamification(gamificationSummary);
+
+          const previous = lastPointsRef.current;
+
+          if (
+            previous &&
+            previous.date === today &&
+            gamificationSummary.todayPoints > previous.points
+          ) {
+            const earned = gamificationSummary.todayPoints - previous.points;
+
+            setToast({
+              id: Date.now(),
+              title: `+${earned} pts`,
+              subtitle: gamificationSummary.qualifiedToday
+                ? "Day complete! Your streak grows."
+                : `${gamificationSummary.todayPoints}/${DAILY_POINT_CAP} points today`,
+            });
+          }
+
+          lastPointsRef.current = {
+            date: today,
+            points: gamificationSummary.todayPoints,
+          };
         }
       } catch (error) {
         Sentry.logger.error("Dashboard loading failed", {
@@ -404,6 +451,9 @@ export default function HomeScreen() {
           </View>
         </View>
 
+        {/* Points, streak and group rank */}
+        {gamification && <HomeProgressCard summary={gamification} />}
+
         {/* Macros */}
         <View style={styles.sectionHeader}>
           <View>
@@ -572,6 +622,15 @@ export default function HomeScreen() {
           Small choices. Consistent progress.
         </Text>
       </ScrollView>
+
+      {toast && (
+        <PointsToast
+          toastId={toast.id}
+          title={toast.title}
+          subtitle={toast.subtitle}
+          onDone={() => setToast(null)}
+        />
+      )}
     </View>
   );
 }
