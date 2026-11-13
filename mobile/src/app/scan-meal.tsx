@@ -259,12 +259,9 @@ export default function ScanMealScreen() {
           ? error.message
           : "Something went wrong while analyzing your meal.";
 
-      showDialog(
-        "Could not analyze meal",
-        message,
-        [{ text: "OK" }],
-        { type: "error" },
-      );
+      showDialog("Could not analyze meal", message, [{ text: "OK" }], {
+        type: "error",
+      });
     } finally {
       setAnalyzing(false);
     }
@@ -428,6 +425,7 @@ export default function ScanMealScreen() {
       const { data, error } = await supabase.functions.invoke("save-ai-meal", {
         body: {
           log_date: localDate(),
+          meal_name: meal.meal_name?.trim() || "Scanned meal",
           items: meal.items.map((item) => ({
             name: item.name.trim(),
             quantity_g: Number(item.quantity_g),
@@ -478,12 +476,9 @@ export default function ScanMealScreen() {
           ? error.message
           : "Something went wrong while saving your meal.";
 
-      showDialog(
-        "Could not save meal",
-        message,
-        [{ text: "OK" }],
-        { type: "error" },
-      );
+      showDialog("Could not save meal", message, [{ text: "OK" }], {
+        type: "error",
+      });
     } finally {
       setSaving(false);
     }
@@ -955,7 +950,6 @@ export default function ScanMealScreen() {
     </KeyboardAvoidingView>
   );
 }
-
 
 const C = {
   bg: "#101010",
@@ -1509,5 +1503,4 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     letterSpacing: 1.2,
   },
-
 });

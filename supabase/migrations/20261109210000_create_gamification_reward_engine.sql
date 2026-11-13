@@ -530,7 +530,7 @@ from public, anon, authenticated;
 
 
 -- Trusted server-side role retains access.
-grant execute on function
+grant execute on function       
     public.recalculate_daily_activity(uuid, date)
 to service_role;
 
