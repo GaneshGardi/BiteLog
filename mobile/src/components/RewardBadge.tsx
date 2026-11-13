@@ -23,7 +23,14 @@ import {
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const WINNER = require("../../assets/animations/Winner.json");
 
-const AUTO_CLOSE_MS = 5000;
+/** How long the popup stays up before closing itself. */
+const AUTO_CLOSE_EARNED_MS = 8000;
+const AUTO_CLOSE_PLAIN_MS = 4500;
+
+/** Timeline (ms after the popup opens). */
+const LOTTIE_DELAY_MS = 280;
+const COUNT_DELAY_MS = 600;
+const LINES_DELAY_MS = 900;
 
 const LINE_LABEL: Record<RewardType, string> = {
   food_logged: "Logged food today",
@@ -52,10 +59,14 @@ export default function RewardBadge({
   // Recolour once, not on every render.
   const animation = useMemo(() => recolorLottie(WINNER), []);
 
-  const scale = useRef(new Animated.Value(0.82)).current;
+  const lottieRef = useRef<LottieView>(null);
+
   const fade = useRef(new Animated.Value(0)).current;
+  const scale = useRef(new Animated.Value(0.85)).current;
+  const lift = useRef(new Animated.Value(28)).current;
   const count = useRef(new Animated.Value(0)).current;
   const bar = useRef(new Animated.Value(0)).current;
+  const lines = useRef(new Animated.Value(0)).current;
   const closing = useRef(false);
   const [shownPoints, setShownPoints] = useState(0);
 
@@ -64,51 +75,88 @@ export default function RewardBadge({
 
     closing.current = false;
     setShownPoints(0);
-    scale.setValue(0.82);
     fade.setValue(0);
+    scale.setValue(0.85);
+    lift.setValue(28);
     count.setValue(0);
     bar.setValue(0);
+    lines.setValue(0);
+    lottieRef.current?.reset();
 
-    const id = count.addListener(({ value }) =>
+    const listenerId = count.addListener(({ value }) =>
       setShownPoints(Math.round(value)),
     );
 
+    const timers: ReturnType<typeof setTimeout>[] = [];
+
+    // 1. Card fades + springs in
     Animated.parallel([
       Animated.timing(fade, {
         toValue: 1,
-        duration: 180,
+        duration: 280,
+        easing: Easing.out(Easing.cubic),
         useNativeDriver: true,
       }),
       Animated.spring(scale, {
         toValue: 1,
-        friction: 6,
-        tension: 90,
+        friction: 7,
+        tension: 55,
         useNativeDriver: true,
       }),
-      Animated.sequence([
-        Animated.delay(350),
+      Animated.spring(lift, {
+        toValue: 0,
+        friction: 8,
+        tension: 55,
+        useNativeDriver: true,
+      }),
+    ]).start();
+
+    // 2. Trophy animation
+    timers.push(setTimeout(() => lottieRef.current?.play(), LOTTIE_DELAY_MS));
+
+    // 3. Points count up + progress bar fill
+    timers.push(
+      setTimeout(() => {
         Animated.parallel([
           Animated.timing(count, {
             toValue: result.total,
-            duration: 800,
+            duration: 1100,
             easing: Easing.out(Easing.cubic),
             useNativeDriver: false,
           }),
           Animated.timing(bar, {
             toValue: Math.min(result.todayPoints / MAX_DAILY_POINTS, 1),
-            duration: 900,
+            duration: 1200,
             easing: Easing.out(Easing.cubic),
             useNativeDriver: false,
           }),
-        ]),
-      ]),
-    ]).start();
+        ]).start();
+      }, COUNT_DELAY_MS),
+    );
 
-    const timer = setTimeout(close, AUTO_CLOSE_MS);
+    // 4. Reward lines slide in one by one
+    timers.push(
+      setTimeout(() => {
+        Animated.timing(lines, {
+          toValue: 1,
+          duration: 900,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: true,
+        }).start();
+      }, LINES_DELAY_MS),
+    );
+
+    // Auto close, later when points were earned so there's time to read it
+    timers.push(
+      setTimeout(
+        close,
+        result.total > 0 ? AUTO_CLOSE_EARNED_MS : AUTO_CLOSE_PLAIN_MS,
+      ),
+    );
 
     return () => {
-      clearTimeout(timer);
-      count.removeListener(id);
+      timers.forEach(clearTimeout);
+      count.removeListener(listenerId);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
@@ -120,12 +168,20 @@ export default function RewardBadge({
     Animated.parallel([
       Animated.timing(fade, {
         toValue: 0,
-        duration: 150,
+        duration: 260,
+        easing: Easing.in(Easing.cubic),
         useNativeDriver: true,
       }),
       Animated.timing(scale, {
-        toValue: 0.92,
-        duration: 150,
+        toValue: 0.94,
+        duration: 260,
+        easing: Easing.in(Easing.cubic),
+        useNativeDriver: true,
+      }),
+      Animated.timing(lift, {
+        toValue: 14,
+        duration: 260,
+        easing: Easing.in(Easing.cubic),
         useNativeDriver: true,
       }),
     ]).start(() => onClose());
@@ -150,13 +206,17 @@ export default function RewardBadge({
         <Animated.View
           style={[
             styles.card,
-            { width: cardWidth, transform: [{ scale }] },
+            {
+              width: cardWidth,
+              transform: [{ translateY: lift }, { scale }],
+            },
           ]}
         >
           <View style={styles.lottieWrap}>
             <LottieView
+              ref={lottieRef}
               source={animation}
-              autoPlay
+              autoPlay={false}
               loop={false}
               style={styles.lottie}
               resizeMode="contain"
@@ -181,21 +241,49 @@ export default function RewardBadge({
           )}
 
           {!!subtitle && (
-            <Text style={styles.subtitle} numberOfLines={1}>
+            <Text style={styles.subtitle} numberOfLines={2}>
               {subtitle}
             </Text>
           )}
 
           {earned && (
             <View style={styles.lines}>
-              {result.lines.map((line) => (
-                <View key={line.type} style={styles.line}>
-                  <Text style={styles.lineLabel}>{LINE_LABEL[line.type]}</Text>
-                  <View style={styles.linePill}>
-                    <Text style={styles.linePillText}>+{line.points}</Text>
-                  </View>
-                </View>
-              ))}
+              {result.lines.map((line, index) => {
+                const start = Math.min(index * 0.22, 0.6);
+                const range = [start, start + 0.4];
+
+                return (
+                  <Animated.View
+                    key={line.type}
+                    style={[
+                      styles.line,
+                      {
+                        opacity: lines.interpolate({
+                          inputRange: range,
+                          outputRange: [0, 1],
+                          extrapolate: "clamp",
+                        }),
+                        transform: [
+                          {
+                            translateY: lines.interpolate({
+                              inputRange: range,
+                              outputRange: [14, 0],
+                              extrapolate: "clamp",
+                            }),
+                          },
+                        ],
+                      },
+                    ]}
+                  >
+                    <Text style={styles.lineLabel}>
+                      {LINE_LABEL[line.type]}
+                    </Text>
+                    <View style={styles.linePill}>
+                      <Text style={styles.linePillText}>+{line.points}</Text>
+                    </View>
+                  </Animated.View>
+                );
+              })}
             </View>
           )}
 
@@ -302,6 +390,7 @@ const styles = StyleSheet.create({
     maxWidth: "90%",
     fontSize: 13,
     color: colors.muted,
+    textAlign: "center",
   },
   lines: { alignSelf: "stretch", marginTop: 16, gap: 8 },
   line: {

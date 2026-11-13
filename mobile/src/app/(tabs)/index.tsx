@@ -2,6 +2,7 @@ import { useCallback, useRef, useState, useEffect } from "react";
 import {
   ActivityIndicator,
   Animated,
+  LayoutAnimation,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -14,7 +15,6 @@ import { useAppDialog } from "../../contexts/AppDialogContext";
 import Svg, { Circle } from "react-native-svg";
 import {
   Apple,
-  ChevronRight,
   Flame,
   Leaf,
   Trash2,
@@ -22,7 +22,6 @@ import {
   Wheat,
   Beef,
   Droplets,
-  Trophy,
 } from "lucide-react-native";
 
 import { getCurrentUser, isProfileComplete } from "../../lib/auth";
@@ -31,6 +30,7 @@ import { usePostHog } from "posthog-react-native";
 import { Sentry } from "../../lib/sentry";
 import HomeProgressCard from "../../components/HomeProgressCard";
 import FloatingAddButton from "../../components/FloatingAddButton";
+import AnimatedNumber from "../../components/AnimatedNumber";
 import { useReward } from "../../components/RewardContext";
 import {
   DAILY_POINT_CAP,
@@ -146,6 +146,14 @@ export default function HomeScreen() {
           );
         }
 
+        // Animate the food list when items are added / removed
+        // (skip on the very first load so the screen doesn't jump).
+        if (hasLoadedRef.current) {
+          LayoutAnimation.configureNext(
+            LayoutAnimation.create(260, "easeInEaseOut", "opacity"),
+          );
+        }
+
         if (foodLogsResult.error) {
           Sentry.logger.error("Failed to load dashboard food logs", {
             operation: "load_dashboard_food_logs",
@@ -187,7 +195,7 @@ export default function HomeScreen() {
           setNutrition(totals);
         }
 
-        // Points detection → show Winner.json reward badge (same logic as before)
+        // Points detection → show Winner.json reward badge
         if (gamificationSummary) {
           setGamification(gamificationSummary);
 
@@ -381,8 +389,13 @@ export default function HomeScreen() {
           <View style={styles.calorieContent}>
             <CalorieRing progress={progress} overGoal={overGoal}>
               <Text style={styles.ringPercent}>
-                {dailyCalories ? Math.round(progress * 100) : "—"}
-                {dailyCalories ? "%" : ""}
+                {dailyCalories ? (
+                  <>
+                    <AnimatedNumber value={Math.round(progress * 100)} />%
+                  </>
+                ) : (
+                  "—"
+                )}
               </Text>
               <Text style={styles.ringCaption}>
                 {dailyCalories ? "of goal" : "set goal"}
@@ -390,17 +403,22 @@ export default function HomeScreen() {
             </CalorieRing>
 
             <View style={styles.calorieStats}>
-              <Text style={styles.consumedCalories}>
-                {Math.round(caloriesConsumed).toLocaleString("en-IN")}
-              </Text>
+              <AnimatedNumber
+                value={caloriesConsumed}
+                style={styles.consumedCalories}
+              />
               <Text style={styles.smallLabel}>kcal consumed</Text>
 
               <View style={styles.statDivider} />
 
               <Text style={styles.goalValue}>
-                {dailyCalories !== null
-                  ? `${Math.round(dailyCalories).toLocaleString("en-IN")} kcal`
-                  : "Not set"}
+                {dailyCalories !== null ? (
+                  <>
+                    <AnimatedNumber value={dailyCalories} /> kcal
+                  </>
+                ) : (
+                  "Not set"
+                )}
               </Text>
               <Text style={styles.smallLabel}>daily goal</Text>
             </View>
@@ -412,11 +430,20 @@ export default function HomeScreen() {
             </View>
             <View style={{ flex: 1 }}>
               <Text style={styles.remainingTitle}>
-                {overGoal
-                  ? `${Math.round(caloriesConsumed - (dailyCalories ?? 0)).toLocaleString("en-IN")} kcal over`
-                  : remaining !== null
-                    ? `${Math.round(remaining).toLocaleString("en-IN")} kcal left`
-                    : "Set a daily goal"}
+                {overGoal ? (
+                  <>
+                    <AnimatedNumber
+                      value={caloriesConsumed - (dailyCalories ?? 0)}
+                    />{" "}
+                    kcal over
+                  </>
+                ) : remaining !== null ? (
+                  <>
+                    <AnimatedNumber value={remaining} /> kcal left
+                  </>
+                ) : (
+                  "Set a daily goal"
+                )}
               </Text>
               <Text style={styles.remainingSub}>
                 {overGoal
@@ -546,6 +573,8 @@ export default function HomeScreen() {
 /* Small presentational helpers                                         */
 /* ------------------------------------------------------------------ */
 
+const AnimatedCircle = Animated.createAnimatedComponent(Circle);
+
 type CalorieRingProps = {
   progress: number;
   overGoal: boolean;
@@ -558,12 +587,11 @@ function CalorieRing({ progress, overGoal, children }: CalorieRingProps) {
   const radius = (size - stroke) / 2;
   const circumference = 2 * Math.PI * radius;
   const animatedProgress = useRef(new Animated.Value(0)).current;
-  const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
   useEffect(() => {
     const animation = Animated.timing(animatedProgress, {
       toValue: progress,
-      duration: 650,
+      duration: 800,
       useNativeDriver: false,
     });
 
@@ -625,7 +653,7 @@ function MacroCard({ label, value, icon }: MacroCardProps) {
       <View style={styles.macroIcon}>{icon}</View>
       <Text style={styles.macroLabel}>{label}</Text>
       <Text style={styles.macroValue}>
-        {value.toFixed(1)}
+        <AnimatedNumber value={value} decimals={1} />
         <Text style={styles.macroUnit}> g</Text>
       </Text>
       <View style={styles.macroBarTrack}>
@@ -688,7 +716,7 @@ const styles = StyleSheet.create({
     borderColor: BORDER,
     alignItems: "center",
     justifyContent: "center",
-    marginTop: 10
+    marginTop: 10,
   },
   calorieCard: {
     backgroundColor: CARD,

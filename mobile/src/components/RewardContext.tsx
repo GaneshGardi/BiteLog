@@ -2,7 +2,9 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -10,6 +12,9 @@ import { usePostHog } from "posthog-react-native";
 
 import RewardBadge from "../components/RewardBadge";
 import { EMPTY_REWARD, type RewardResult } from "../lib/rewards";
+
+/** Lets the previous screen finish its transition before the popup appears. */
+const REWARD_DELAY_MS = 400;
 
 type ShowRewardOptions = {
   /** Shown under the points, usually the food name. */
@@ -32,6 +37,13 @@ const RewardContext = createContext<RewardContextValue | undefined>(undefined);
 export function RewardProvider({ children }: { children: ReactNode }) {
   const posthog = usePostHog();
   const [state, setState] = useState<State | null>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, []);
 
   const showReward = useCallback(
     (result: RewardResult, options: ShowRewardOptions = {}) => {
@@ -39,7 +51,12 @@ export function RewardProvider({ children }: { children: ReactNode }) {
         points: result.total,
         reward_types: result.lines.map((l) => l.type),
       });
-      setState({ result, options });
+
+      if (timerRef.current) clearTimeout(timerRef.current);
+
+      timerRef.current = setTimeout(() => {
+        setState({ result, options });
+      }, REWARD_DELAY_MS);
     },
     [posthog],
   );

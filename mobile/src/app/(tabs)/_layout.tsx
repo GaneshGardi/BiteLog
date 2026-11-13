@@ -12,6 +12,28 @@ export default function TabsLayout() {
         headerShown: false,
         freezeOnBlur: true,
 
+        // Subtle fade + small horizontal slide between tabs.
+        transitionSpec: {
+          animation: "timing",
+          config: { duration: 240 },
+        },
+        sceneStyleInterpolator: ({ current }) => ({
+          sceneStyle: {
+            opacity: current.progress.interpolate({
+              inputRange: [-1, 0, 1],
+              outputRange: [0, 1, 0],
+            }),
+            transform: [
+              {
+                translateX: current.progress.interpolate({
+                  inputRange: [-1, 0, 1],
+                  outputRange: [-14, 0, 14],
+                }),
+              },
+            ],
+          },
+        }),
+
         tabBarActiveTintColor: "#B6F36B",
         tabBarInactiveTintColor: "#777777",
 

@@ -1,9 +1,9 @@
 import { useMemo, useState } from "react";
 import {
-  ActivityIndicator,
   Image,
   Keyboard,
   KeyboardAvoidingView,
+  LayoutAnimation,
   Platform,
   Pressable,
   ScrollView,
@@ -35,6 +35,7 @@ import { supabase } from "../lib/supabase";
 import { usePostHog } from "posthog-react-native";
 import { Sentry } from "../lib/sentry";
 import { useAppDialog } from "../contexts/AppDialogContext";
+import FoodLoadingOverlay from "../components/FoodLoadingOverlay";
 
 type MealItem = {
   name: string;
@@ -62,6 +63,28 @@ type NewFoodForm = {
   fiber: string;
 };
 
+type Phase = "analyze" | "save";
+
+const PHASE_COPY: Record<Phase, { title: string; messages: string[] }> = {
+  analyze: {
+    title: "Analyzing your meal",
+    messages: [
+      "Looking at your plate...",
+      "Identifying each food...",
+      "Estimating portion sizes...",
+      "Counting calories and macros...",
+    ],
+  },
+  save: {
+    title: "Saving your meal",
+    messages: [
+      "Adding it to today's log...",
+      "Updating your progress...",
+      "Checking for rewards...",
+    ],
+  },
+};
+
 const emptyFood: NewFoodForm = {
   name: "",
   quantity_g: "100",
@@ -82,6 +105,13 @@ const localDate = () => {
 
 const numberValue = (value: string) => Number(value.trim());
 
+/** Smoothly animates the next layout change (results appearing, etc.). */
+function smooth() {
+  LayoutAnimation.configureNext(
+    LayoutAnimation.create(260, "easeInEaseOut", "opacity"),
+  );
+}
+
 export default function ScanMealScreen() {
   const posthog = usePostHog();
   const { showDialog } = useAppDialog();
@@ -95,6 +125,8 @@ export default function ScanMealScreen() {
   const [saving, setSaving] = useState(false);
   const [showAddForm, setShowAddForm] = useState(false);
   const [newFood, setNewFood] = useState<NewFoodForm>({ ...emptyFood });
+  // Not reset after loading, so the text doesn't change while the overlay fades out.
+  const [phase, setPhase] = useState<Phase>("analyze");
 
   const totals = useMemo(() => {
     const items = meal?.items ?? [];
@@ -159,6 +191,7 @@ export default function ScanMealScreen() {
         return;
       }
 
+      smooth();
       setImageUri(asset.uri);
       setImageBase64(asset.base64);
       setMimeType(asset.mimeType || "image/jpeg");
@@ -198,6 +231,7 @@ export default function ScanMealScreen() {
     if (analyzing || saving) return;
 
     Keyboard.dismiss();
+    setPhase("analyze");
     setAnalyzing(true);
     posthog.capture("meal_scan_started");
 
@@ -231,6 +265,7 @@ export default function ScanMealScreen() {
         })),
       };
 
+      smooth();
       setMeal(normalizedMeal);
       Sentry.logger.info("Meal analysis completed", {
         operation: "meal_analysis",
@@ -292,6 +327,7 @@ export default function ScanMealScreen() {
   };
 
   const removeItem = (index: number) => {
+    smooth();
     setMeal((current) =>
       current
         ? {
@@ -359,6 +395,7 @@ export default function ScanMealScreen() {
       return;
     }
 
+    smooth();
     setMeal((current) => {
       if (!current) return current;
 
@@ -418,6 +455,7 @@ export default function ScanMealScreen() {
     }
 
     Keyboard.dismiss();
+    setPhase("save");
     setSaving(true);
     posthog.capture("ai_meal_save_started");
 
@@ -462,7 +500,7 @@ export default function ScanMealScreen() {
             onPress: () => router.back(),
           },
         ],
-        { type: "success" },
+        { type: "success", cancelable: false },
       );
     } catch (error) {
       Sentry.logger.error("AI meal save failed", {
@@ -483,6 +521,8 @@ export default function ScanMealScreen() {
       setSaving(false);
     }
   };
+
+  const phaseCopy = PHASE_COPY[phase];
 
   return (
     <KeyboardAvoidingView
@@ -555,6 +595,7 @@ export default function ScanMealScreen() {
               <Pressable
                 style={styles.removePhoto}
                 onPress={() => {
+                  smooth();
                   setImageUri(null);
                   setImageBase64(null);
                   setMeal(null);
@@ -610,32 +651,9 @@ export default function ScanMealScreen() {
           onPress={analyzeMeal}
           disabled={!imageBase64 || analyzing || saving}
         >
-          {analyzing ? (
-            <>
-              <ActivityIndicator color={C.bg} />
-              <Text style={styles.primaryButtonText}>Analyzing meal...</Text>
-            </>
-          ) : (
-            <>
-              <ScanLine size={19} color={C.bg} />
-              <Text style={styles.primaryButtonText}>Analyze with AI</Text>
-            </>
-          )}
+          <ScanLine size={19} color={C.bg} />
+          <Text style={styles.primaryButtonText}>Analyze with AI</Text>
         </Pressable>
-
-        {analyzing && (
-          <View style={styles.statusCard}>
-            <ActivityIndicator color={C.accent} />
-
-            <View style={styles.statusContent}>
-              <Text style={styles.statusTitle}>Looking at your meal</Text>
-              <Text style={styles.hint}>
-                Identifying foods and estimating portions. This may take a few
-                seconds.
-              </Text>
-            </View>
-          </View>
-        )}
 
         {meal && (
           <View style={styles.results}>
@@ -759,7 +777,10 @@ export default function ScanMealScreen() {
 
             <Pressable
               style={styles.addFoodButton}
-              onPress={() => setShowAddForm((visible) => !visible)}
+              onPress={() => {
+                smooth();
+                setShowAddForm((visible) => !visible);
+              }}
               disabled={saving || analyzing}
             >
               <View style={styles.addFoodIcon}>
@@ -914,19 +935,8 @@ export default function ScanMealScreen() {
               onPress={saveMeal}
               disabled={saving || analyzing || meal.items.length === 0}
             >
-              {saving ? (
-                <>
-                  <ActivityIndicator color={C.bg} />
-                  <Text style={styles.primaryButtonText}>Saving meal...</Text>
-                </>
-              ) : (
-                <>
-                  <CheckCircle2 size={19} color={C.bg} />
-                  <Text style={styles.primaryButtonText}>
-                    Save meal to today
-                  </Text>
-                </>
-              )}
+              <CheckCircle2 size={19} color={C.bg} />
+              <Text style={styles.primaryButtonText}>Save meal to today</Text>
             </Pressable>
           </View>
         )}
@@ -947,6 +957,12 @@ export default function ScanMealScreen() {
           </Text>
         </View>
       </ScrollView>
+
+      <FoodLoadingOverlay
+        visible={analyzing || saving}
+        title={phaseCopy.title}
+        messages={phaseCopy.messages}
+      />
     </KeyboardAvoidingView>
   );
 }
@@ -1180,25 +1196,6 @@ const styles = StyleSheet.create({
   },
   disabledButton: {
     opacity: 0.45,
-  },
-  statusCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 13,
-    backgroundColor: C.card,
-    borderWidth: 1,
-    borderColor: C.border,
-    borderRadius: 15,
-    padding: 16,
-  },
-  statusContent: {
-    flex: 1,
-    gap: 4,
-  },
-  statusTitle: {
-    color: C.text,
-    fontSize: 14,
-    fontWeight: "700",
   },
   results: {
     gap: 16,
