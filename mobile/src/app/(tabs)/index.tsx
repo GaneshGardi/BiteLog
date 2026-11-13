@@ -680,14 +680,15 @@ const styles = StyleSheet.create({
     color: MUTED,
   },
   profileButton: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
+    width: 52,
+    height: 52,
+    borderRadius: 30,
     backgroundColor: CARD,
     borderWidth: 1,
     borderColor: BORDER,
     alignItems: "center",
     justifyContent: "center",
+    marginTop: 10
   },
   calorieCard: {
     backgroundColor: CARD,
