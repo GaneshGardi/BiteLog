@@ -19,6 +19,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 import AppModal from "../../components/AppModal";
+import GroupLeaderboard from "../../components/GroupLeaderboard";
 import { useAppDialog } from "../../contexts/AppDialogContext";
 import { supabase } from "../../lib/supabase";
 import { usePostHog } from "posthog-react-native";
@@ -69,6 +70,10 @@ export default function GroupDetailsScreen() {
   const [members, setMembers] = useState<Member[]>([]);
   const [profiles, setProfiles] = useState<Record<string, Profile>>({});
   const [dailyProgress, setDailyProgress] = useState<DailyProgress[]>([]);
+  const [activeTab, setActiveTab] = useState<"leaderboard" | "members">(
+    "leaderboard",
+  );
+  const [leaderboardRefreshKey, setLeaderboardRefreshKey] = useState(0);
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -88,6 +93,9 @@ export default function GroupDetailsScreen() {
       setRefreshing(false);
       return;
     }
+
+    // Ask the leaderboard tab to reload along with the rest of the screen.
+    setLeaderboardRefreshKey((key) => key + 1);
 
     try {
       const { data: groupData, error: groupError } = await supabase
@@ -423,6 +431,64 @@ export default function GroupDetailsScreen() {
             </Text>
           </View>
 
+          {/* Tabs */}
+          <View style={styles.tabBar}>
+            <Pressable
+              style={[
+                styles.tabButton,
+                activeTab === "leaderboard" && styles.tabButtonActive,
+              ]}
+              onPress={() => setActiveTab("leaderboard")}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: activeTab === "leaderboard" }}
+            >
+              <Ionicons
+                name="trophy-outline"
+                size={16}
+                color={activeTab === "leaderboard" ? "#101010" : "#999999"}
+              />
+              <Text
+                style={[
+                  styles.tabText,
+                  activeTab === "leaderboard" && styles.tabTextActive,
+                ]}
+              >
+                Leaderboard
+              </Text>
+            </Pressable>
+
+            <Pressable
+              style={[
+                styles.tabButton,
+                activeTab === "members" && styles.tabButtonActive,
+              ]}
+              onPress={() => setActiveTab("members")}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: activeTab === "members" }}
+            >
+              <Ionicons
+                name="people-outline"
+                size={16}
+                color={activeTab === "members" ? "#101010" : "#999999"}
+              />
+              <Text
+                style={[
+                  styles.tabText,
+                  activeTab === "members" && styles.tabTextActive,
+                ]}
+              >
+                Members
+              </Text>
+            </Pressable>
+          </View>
+
+          {activeTab === "leaderboard" && groupId ? (
+            <GroupLeaderboard
+              groupId={groupId}
+              refreshKey={leaderboardRefreshKey}
+            />
+          ) : (
+            <>
           {/* Members heading */}
           <View style={styles.sectionHeader}>
             <View>
@@ -598,6 +664,8 @@ export default function GroupDetailsScreen() {
               );
             })
           )}
+            </>
+          )}
 
           {/* Invite friends */}
           <Pressable
@@ -614,8 +682,8 @@ export default function GroupDetailsScreen() {
           <View style={styles.privacyNote}>
             <Ionicons name="lock-closed-outline" size={15} color="#777777" />
             <Text style={styles.footer}>
-              Only daily calorie progress is shared. Individual food logs remain
-              private.
+              Only daily calorie progress, points and streaks are shared.
+              Individual food logs remain private.
             </Text>
           </View>
         </ScrollView>
@@ -886,6 +954,35 @@ const styles = StyleSheet.create({
     color: "#B6F36B",
     fontSize: 13,
     fontWeight: "800",
+  },
+  tabBar: {
+    flexDirection: "row",
+    backgroundColor: "#1A1A1A",
+    borderWidth: 1,
+    borderColor: "#303030",
+    borderRadius: 16,
+    padding: 4,
+    marginBottom: 22,
+  },
+  tabButton: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+    paddingVertical: 12,
+    borderRadius: 12,
+  },
+  tabButtonActive: {
+    backgroundColor: "#B6F36B",
+  },
+  tabText: {
+    color: "#999999",
+    fontSize: 14,
+    fontWeight: "700",
+  },
+  tabTextActive: {
+    color: "#101010",
   },
   errorBanner: {
     flexDirection: "row",

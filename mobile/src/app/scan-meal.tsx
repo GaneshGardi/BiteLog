@@ -1,9 +1,11 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { ComponentRef } from "react";
 import {
-  ActivityIndicator,
+  Animated,
   Image,
   Keyboard,
   KeyboardAvoidingView,
+  LayoutAnimation,
   Platform,
   Pressable,
   ScrollView,
@@ -11,23 +13,23 @@ import {
   Text,
   TextInput,
   View,
+  type LayoutChangeEvent,
 } from "react-native";
 import {
   ArrowLeft,
+  Beef,
   Camera,
+  Check,
   CheckCircle2,
-  ChevronRight,
+  Droplets,
   Flame,
   ImagePlus,
   Leaf,
-  Plus,
   ScanLine,
   Trash2,
   Utensils,
   Wheat,
   X,
-  Beef,
-  Droplets,
 } from "lucide-react-native";
 import * as ImagePicker from "expo-image-picker";
 import { router } from "expo-router";
@@ -35,8 +37,14 @@ import { supabase } from "../lib/supabase";
 import { usePostHog } from "posthog-react-native";
 import { Sentry } from "../lib/sentry";
 import { useAppDialog } from "../contexts/AppDialogContext";
+import FoodLoadingOverlay from "../components/FoodLoadingOverlay";
+import AnimatedNumber from "../components/AnimatedNumber";
 
-type MealItem = {
+/* ------------------------------------------------------------------ */
+/* Types & helpers                                                      */
+/* ------------------------------------------------------------------ */
+
+type RawMealItem = {
   name: string;
   quantity_g: number;
   calories: number;
@@ -46,31 +54,88 @@ type MealItem = {
   fiber: number;
 };
 
-type MealResult = {
-  meal_name: string;
-  notes?: string;
-  items: MealItem[];
+type NumericField =
+  | "quantity_g"
+  | "calories"
+  | "protein"
+  | "carbs"
+  | "fat"
+  | "fiber";
+
+type NutritionField = Exclude<NumericField, "quantity_g">;
+
+const NUTRITION_FIELDS: NutritionField[] = [
+  "calories",
+  "protein",
+  "carbs",
+  "fat",
+  "fiber",
+];
+
+const NUTRITION_LABELS: Record<NutritionField, string> = {
+  calories: "Calories (kcal)",
+  protein: "Protein (g)",
+  carbs: "Carbs (g)",
+  fat: "Fat (g)",
+  fiber: "Fiber (g)",
 };
 
-type NewFoodForm = {
+/**
+ * One editable food item.
+ *
+ * `values` is exactly what the text inputs show (so typing "1." works).
+ * `anchor` is the reference used to scale nutrition when the portion
+ * changes. It starts as the AI estimate and is re-based whenever the
+ * user edits a nutrition value by hand.
+ */
+type EditableItem = {
+  id: string;
   name: string;
-  quantity_g: string;
-  calories: string;
-  protein: string;
-  carbs: string;
-  fat: string;
-  fiber: string;
+  values: Record<NumericField, string>;
+  anchor: Record<NumericField, number>;
 };
 
-const emptyFood: NewFoodForm = {
-  name: "",
-  quantity_g: "100",
-  calories: "",
-  protein: "0",
-  carbs: "0",
-  fat: "0",
-  fiber: "0",
+type EditableMeal = {
+  meal_name: string;
+  notes: string;
+  items: EditableItem[];
 };
+
+type Phase = "analyze" | "save";
+
+const PHASE_COPY: Record<Phase, { title: string; messages: string[] }> = {
+  analyze: {
+    title: "Analyzing your meal",
+    messages: [
+      "Looking at your plate...",
+      "Identifying each food...",
+      "Estimating portion sizes...",
+      "Counting calories and macros...",
+    ],
+  },
+  save: {
+    title: "Saving your meal",
+    messages: [
+      "Adding it to today's log...",
+      "Updating your progress...",
+      "Checking for rewards...",
+    ],
+  },
+};
+
+/** The analyze-meal function rejects images above 12M base64 characters. */
+const MAX_BASE64_LENGTH = 11_000_000;
+
+let itemCounter = 0;
+const nextItemId = () => `item-${Date.now()}-${itemCounter++}`;
+
+/** Text -> number. Empty or invalid text counts as 0. */
+const num = (text: string) => {
+  const value = Number(text.trim() === "" ? "0" : text);
+  return Number.isFinite(value) ? value : 0;
+};
+
+const formatValue = (value: number) => String(Math.round(value * 10) / 10);
 
 const localDate = () => {
   const now = new Date();
@@ -80,39 +145,130 @@ const localDate = () => {
   return `${year}-${month}-${day}`;
 };
 
-const numberValue = (value: string) => Number(value.trim());
+function createItem(raw: Partial<RawMealItem>): EditableItem {
+  const anchor: Record<NumericField, number> = {
+    quantity_g: Number(raw.quantity_g) || 0,
+    calories: Number(raw.calories) || 0,
+    protein: Number(raw.protein) || 0,
+    carbs: Number(raw.carbs) || 0,
+    fat: Number(raw.fat) || 0,
+    fiber: Number(raw.fiber) || 0,
+  };
+
+  return {
+    id: nextItemId(),
+    name: String(raw.name || ""),
+    anchor,
+    values: {
+      quantity_g: formatValue(anchor.quantity_g),
+      calories: formatValue(anchor.calories),
+      protein: formatValue(anchor.protein),
+      carbs: formatValue(anchor.carbs),
+      fat: formatValue(anchor.fat),
+      fiber: formatValue(anchor.fiber),
+    },
+  };
+}
+
+/** Smoothly animates the next layout change (results appearing, etc.). */
+function smooth() {
+  LayoutAnimation.configureNext(
+    LayoutAnimation.create(260, "easeInEaseOut", "opacity"),
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* "Analyze" confirm button shown on the photo                          */
+/* ------------------------------------------------------------------ */
+
+function ConfirmPill({
+  onPress,
+  disabled,
+}: {
+  onPress: () => void;
+  disabled: boolean;
+}) {
+  const scale = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    Animated.spring(scale, {
+      toValue: 1,
+      friction: 6,
+      tension: 90,
+      useNativeDriver: true,
+    }).start();
+  }, [scale]);
+
+  return (
+    <Animated.View
+      style={[
+        styles.confirmWrap,
+        {
+          opacity: scale.interpolate({
+            inputRange: [0, 1],
+            outputRange: [0, 1],
+            extrapolate: "clamp",
+          }),
+          transform: [{ scale }],
+        },
+      ]}
+    >
+      <Pressable
+        style={({ pressed }) => [styles.confirmPill, pressed && styles.pressed]}
+        onPress={onPress}
+        disabled={disabled}
+        accessibilityRole="button"
+        accessibilityLabel="Analyze this photo"
+      >
+        <Check size={18} color={C.bg} strokeWidth={3} />
+        <Text style={styles.confirmText}>Analyze</Text>
+      </Pressable>
+    </Animated.View>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Screen                                                               */
+/* ------------------------------------------------------------------ */
 
 export default function ScanMealScreen() {
   const posthog = usePostHog();
   const { showDialog } = useAppDialog();
+  const scrollRef = useRef<ComponentRef<typeof ScrollView>>(null);
+  const scrollToResultsRef = useRef(false);
 
   const [imageUri, setImageUri] = useState<string | null>(null);
   const [imageBase64, setImageBase64] = useState<string | null>(null);
   const [mimeType, setMimeType] = useState("image/jpeg");
-  const [meal, setMeal] = useState<MealResult | null>(null);
+  const [meal, setMeal] = useState<EditableMeal | null>(null);
 
   const [analyzing, setAnalyzing] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [showAddForm, setShowAddForm] = useState(false);
-  const [newFood, setNewFood] = useState<NewFoodForm>({ ...emptyFood });
+  // Not reset after loading, so the text doesn't change while the overlay fades out.
+  const [phase, setPhase] = useState<Phase>("analyze");
 
+  const busy = analyzing || saving;
+
+  // Live totals: recalculated on every edit, so the preview always matches.
   const totals = useMemo(() => {
     const items = meal?.items ?? [];
 
     return items.reduce(
       (sum, item) => ({
-        calories: sum.calories + (Number(item.calories) || 0),
-        protein: sum.protein + (Number(item.protein) || 0),
-        carbs: sum.carbs + (Number(item.carbs) || 0),
-        fat: sum.fat + (Number(item.fat) || 0),
-        fiber: sum.fiber + (Number(item.fiber) || 0),
+        calories: sum.calories + num(item.values.calories),
+        protein: sum.protein + num(item.values.protein),
+        carbs: sum.carbs + num(item.values.carbs),
+        fat: sum.fat + num(item.values.fat),
+        fiber: sum.fiber + num(item.values.fiber),
       }),
       { calories: 0, protein: 0, carbs: 0, fat: 0, fiber: 0 },
     );
   }, [meal]);
 
+  /* ---------------------------- photo ---------------------------- */
+
   const pickImage = async (useCamera: boolean) => {
-    if (analyzing || saving) return;
+    if (busy) return;
 
     try {
       const permission = useCamera
@@ -131,19 +287,18 @@ export default function ScanMealScreen() {
         return;
       }
 
+      // No native crop step: the photo comes straight back and the
+      // user confirms with the Analyze button.
+      const options: ImagePicker.ImagePickerOptions = {
+        mediaTypes: ["images"],
+        allowsEditing: false,
+        quality: 0.6,
+        base64: true,
+      };
+
       const result = useCamera
-        ? await ImagePicker.launchCameraAsync({
-            mediaTypes: ["images"],
-            allowsEditing: true,
-            quality: 0.8,
-            base64: true,
-          })
-        : await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: ["images"],
-            allowsEditing: true,
-            quality: 0.8,
-            base64: true,
-          });
+        ? await ImagePicker.launchCameraAsync(options)
+        : await ImagePicker.launchImageLibraryAsync(options);
 
       if (result.canceled || !result.assets?.[0]) return;
 
@@ -159,12 +314,25 @@ export default function ScanMealScreen() {
         return;
       }
 
+      if (asset.base64.length > MAX_BASE64_LENGTH) {
+        showDialog(
+          "Photo is too large",
+          "Please choose a smaller photo or take a new one.",
+          [{ text: "OK" }],
+          { type: "warning" },
+        );
+        return;
+      }
+
+      smooth();
       setImageUri(asset.uri);
       setImageBase64(asset.base64);
       setMimeType(asset.mimeType || "image/jpeg");
       setMeal(null);
-      setShowAddForm(false);
-      setNewFood({ ...emptyFood });
+
+      posthog.capture("meal_photo_selected", {
+        source: useCamera ? "camera" : "gallery",
+      });
     } catch (error) {
       Sentry.logger.error("Meal image picker failed", {
         operation: "meal_image_picker",
@@ -184,6 +352,15 @@ export default function ScanMealScreen() {
     }
   };
 
+  const removePhoto = () => {
+    smooth();
+    setImageUri(null);
+    setImageBase64(null);
+    setMeal(null);
+  };
+
+  /* --------------------------- analysis -------------------------- */
+
   const analyzeMeal = async () => {
     if (!imageBase64) {
       showDialog(
@@ -195,9 +372,10 @@ export default function ScanMealScreen() {
       return;
     }
 
-    if (analyzing || saving) return;
+    if (busy) return;
 
     Keyboard.dismiss();
+    setPhase("analyze");
     setAnalyzing(true);
     posthog.capture("meal_scan_started");
 
@@ -217,29 +395,27 @@ export default function ScanMealScreen() {
         );
       }
 
-      const normalizedMeal: MealResult = {
+      const normalizedMeal: EditableMeal = {
         meal_name: String(data.meal.meal_name || "Scanned meal"),
         notes: data.meal.notes ? String(data.meal.notes) : "",
-        items: data.meal.items.map((item: Partial<MealItem>) => ({
-          name: String(item.name || ""),
-          quantity_g: Number(item.quantity_g) || 0,
-          calories: Number(item.calories) || 0,
-          protein: Number(item.protein) || 0,
-          carbs: Number(item.carbs) || 0,
-          fat: Number(item.fat) || 0,
-          fiber: Number(item.fiber) || 0,
-        })),
+        items: data.meal.items.map((item: Partial<RawMealItem>) =>
+          createItem(item),
+        ),
       };
 
+      smooth();
+      scrollToResultsRef.current = true;
       setMeal(normalizedMeal);
+
       Sentry.logger.info("Meal analysis completed", {
         operation: "meal_analysis",
       });
 
       posthog.capture("meal_scan_completed");
-      setShowAddForm(false);
 
       if (normalizedMeal.items.length === 0) {
+        scrollToResultsRef.current = false;
+
         showDialog(
           "No food detected",
           "Try a clearer photo with the food visible from above.",
@@ -259,161 +435,141 @@ export default function ScanMealScreen() {
           ? error.message
           : "Something went wrong while analyzing your meal.";
 
-      showDialog(
-        "Could not analyze meal",
-        message,
-        [{ text: "OK" }],
-        { type: "error" },
-      );
+      showDialog("Could not analyze meal", message, [{ text: "OK" }], {
+        type: "error",
+      });
     } finally {
       setAnalyzing(false);
     }
   };
 
-  const updateItem = (index: number, field: keyof MealItem, value: string) => {
-    setMeal((current) => {
-      if (!current) return current;
+  // After the results appear, scroll them into view once.
+  const handleResultsLayout = (event: LayoutChangeEvent) => {
+    if (!scrollToResultsRef.current) return;
 
-      const items = [...current.items];
-      const existing = { ...items[index] };
+    scrollToResultsRef.current = false;
 
-      if (field === "name") {
-        existing.name = value;
-      } else {
-        const parsed = value.trim() === "" ? 0 : Number(value);
-
-        if (!Number.isFinite(parsed) || parsed < 0) return current;
-
-        const numericField = field as Exclude<keyof MealItem, "name">;
-        existing[numericField] = parsed;
-      }
-
-      items[index] = existing;
-
-      return { ...current, items };
+    scrollRef.current?.scrollTo({
+      y: Math.max(event.nativeEvent.layout.y - 12, 0),
+      animated: true,
     });
   };
 
-  const removeItem = (index: number) => {
+  /* ---------------------------- editing -------------------------- */
+
+  const updateName = (id: string, value: string) => {
     setMeal((current) =>
       current
         ? {
             ...current,
-            items: current.items.filter((_, i) => i !== index),
+            items: current.items.map((item) =>
+              item.id === id ? { ...item, name: value } : item,
+            ),
           }
         : current,
     );
   };
 
-  const updateNewFood = (field: keyof NewFoodForm, value: string) => {
-    setNewFood((current) => ({ ...current, [field]: value }));
-  };
+  const updateValue = (id: string, field: NumericField, rawText: string) => {
+    const text = rawText.replace(",", ".");
 
-  const renderNutritionInput = (
-    label: string,
-    field: Exclude<keyof NewFoodForm, "name" | "quantity_g">,
-    placeholder: string,
-  ) => (
-    <View style={styles.nutritionInput} key={field}>
-      <Text style={styles.inputLabel}>{label}</Text>
-      <TextInput
-        style={styles.input}
-        value={newFood[field]}
-        onChangeText={(value) => updateNewFood(field, value)}
-        keyboardType="decimal-pad"
-        placeholder={placeholder}
-        placeholderTextColor={C.muted}
-        editable={!saving && !analyzing}
-      />
-    </View>
-  );
-
-  const addFoodItem = () => {
-    const name = newFood.name.trim();
-    const quantity = numberValue(newFood.quantity_g);
-    const calories = numberValue(newFood.calories);
-    const protein = numberValue(newFood.protein);
-    const carbs = numberValue(newFood.carbs);
-    const fat = numberValue(newFood.fat);
-    const fiber = numberValue(newFood.fiber);
-
-    if (!name) {
-      showDialog(
-        "Food name required",
-        "Enter a name for this food item.",
-        [{ text: "OK" }],
-        { type: "warning" },
-      );
-      return;
-    }
-
-    const values = [quantity, calories, protein, carbs, fat, fiber];
-
-    if (
-      values.some((value) => !Number.isFinite(value) || value < 0) ||
-      quantity <= 0
-    ) {
-      showDialog(
-        "Check nutrition values",
-        "Enter a portion greater than zero and valid non-negative nutrition values.",
-        [{ text: "OK" }],
-        { type: "warning" },
-      );
-      return;
-    }
+    // Only digits and a single decimal point.
+    if (!/^\d*\.?\d*$/.test(text) || text.length > 8) return;
 
     setMeal((current) => {
       if (!current) return current;
 
       return {
         ...current,
-        items: [
-          ...current.items,
-          {
-            name,
-            quantity_g: quantity,
-            calories,
-            protein,
-            carbs,
-            fat,
-            fiber,
-          },
-        ],
+        items: current.items.map((item) => {
+          if (item.id !== id) return item;
+
+          const values: Record<NumericField, string> = {
+            ...item.values,
+            [field]: text,
+          };
+
+          // Portion changed: scale every nutrition value proportionally.
+          if (field === "quantity_g") {
+            const quantity = num(text);
+
+            if (quantity > 0 && item.anchor.quantity_g > 0) {
+              const ratio = quantity / item.anchor.quantity_g;
+
+              for (const nutrient of NUTRITION_FIELDS) {
+                values[nutrient] = formatValue(item.anchor[nutrient] * ratio);
+              }
+            }
+
+            return { ...item, values };
+          }
+
+          // A nutrition value was edited by hand: use the current numbers
+          // as the new baseline for future portion changes.
+          const quantity = num(values.quantity_g);
+
+          return {
+            ...item,
+            values,
+            anchor: {
+              quantity_g: quantity > 0 ? quantity : item.anchor.quantity_g,
+              calories: num(values.calories),
+              protein: num(values.protein),
+              carbs: num(values.carbs),
+              fat: num(values.fat),
+              fiber: num(values.fiber),
+            },
+          };
+        }),
       };
     });
-
-    setNewFood({ ...emptyFood });
-    setShowAddForm(false);
-    Keyboard.dismiss();
   };
+
+  const removeItem = (id: string) => {
+    smooth();
+    setMeal((current) =>
+      current
+        ? {
+            ...current,
+            items: current.items.filter((item) => item.id !== id),
+          }
+        : current,
+    );
+  };
+
+  /* ----------------------------- save ---------------------------- */
 
   const saveMeal = async () => {
     if (!meal || meal.items.length === 0) {
       showDialog(
         "Nothing to save",
-        "Add at least one food item to your meal.",
+        "Analyze a photo first to get food items.",
         [{ text: "OK" }],
         { type: "warning" },
       );
       return;
     }
 
-    if (saving || analyzing) return;
+    if (busy) return;
 
-    const invalidItem = meal.items.find(
-      (item) =>
-        !item.name.trim() ||
-        !Number.isFinite(Number(item.quantity_g)) ||
-        Number(item.quantity_g) <= 0 ||
-        [item.calories, item.protein, item.carbs, item.fat, item.fiber].some(
-          (value) => !Number.isFinite(Number(value)) || Number(value) < 0,
-        ),
+    const payload = meal.items.map((item) => ({
+      name: item.name.trim(),
+      quantity_g: num(item.values.quantity_g),
+      calories: num(item.values.calories),
+      protein: num(item.values.protein),
+      carbs: num(item.values.carbs),
+      fat: num(item.values.fat),
+      fiber: num(item.values.fiber),
+    }));
+
+    const invalidItem = payload.find(
+      (item) => !item.name || item.quantity_g <= 0,
     );
 
     if (invalidItem) {
       showDialog(
         "Check your food items",
-        "Every item needs a name, a portion greater than zero, and valid nutrition values.",
+        "Every item needs a name and a portion greater than zero.",
         [{ text: "OK" }],
         { type: "warning" },
       );
@@ -421,6 +577,7 @@ export default function ScanMealScreen() {
     }
 
     Keyboard.dismiss();
+    setPhase("save");
     setSaving(true);
     posthog.capture("ai_meal_save_started");
 
@@ -428,15 +585,8 @@ export default function ScanMealScreen() {
       const { data, error } = await supabase.functions.invoke("save-ai-meal", {
         body: {
           log_date: localDate(),
-          items: meal.items.map((item) => ({
-            name: item.name.trim(),
-            quantity_g: Number(item.quantity_g),
-            calories: Number(item.calories),
-            protein: Number(item.protein),
-            carbs: Number(item.carbs),
-            fat: Number(item.fat),
-            fiber: Number(item.fiber),
-          })),
+          meal_name: meal.meal_name?.trim() || "Scanned meal",
+          items: payload,
         },
       });
 
@@ -464,7 +614,7 @@ export default function ScanMealScreen() {
             onPress: () => router.back(),
           },
         ],
-        { type: "success" },
+        { type: "success", cancelable: false },
       );
     } catch (error) {
       Sentry.logger.error("AI meal save failed", {
@@ -478,16 +628,16 @@ export default function ScanMealScreen() {
           ? error.message
           : "Something went wrong while saving your meal.";
 
-      showDialog(
-        "Could not save meal",
-        message,
-        [{ text: "OK" }],
-        { type: "error" },
-      );
+      showDialog("Could not save meal", message, [{ text: "OK" }], {
+        type: "error",
+      });
     } finally {
       setSaving(false);
     }
   };
+
+  const phaseCopy = PHASE_COPY[phase];
+  const hasPhoto = !!imageUri;
 
   return (
     <KeyboardAvoidingView
@@ -496,6 +646,7 @@ export default function ScanMealScreen() {
       keyboardVerticalOffset={0}
     >
       <ScrollView
+        ref={scrollRef}
         contentContainerStyle={styles.container}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
@@ -539,7 +690,11 @@ export default function ScanMealScreen() {
 
           <View style={styles.stepText}>
             <Text style={styles.sectionTitle}>Capture your meal</Text>
-            <Text style={styles.hint}>Use a clear photo from above</Text>
+            <Text style={styles.hint}>
+              {hasPhoto
+                ? "Happy with it? Tap Analyze"
+                : "Use a clear photo from above"}
+            </Text>
           </View>
         </View>
 
@@ -559,18 +714,15 @@ export default function ScanMealScreen() {
 
               <Pressable
                 style={styles.removePhoto}
-                onPress={() => {
-                  setImageUri(null);
-                  setImageBase64(null);
-                  setMeal(null);
-                  setShowAddForm(false);
-                }}
-                disabled={analyzing || saving}
+                onPress={removePhoto}
+                disabled={busy}
                 accessibilityRole="button"
                 accessibilityLabel="Remove selected photo"
               >
                 <X size={18} color={C.text} />
               </Pressable>
+
+              {!meal && <ConfirmPill onPress={analyzeMeal} disabled={busy} />}
             </View>
           ) : (
             <View style={styles.photoPlaceholder}>
@@ -590,60 +742,52 @@ export default function ScanMealScreen() {
             <Pressable
               style={styles.secondaryButton}
               onPress={() => pickImage(true)}
-              disabled={analyzing || saving}
+              disabled={busy}
             >
               <Camera size={18} color={C.text} />
-              <Text style={styles.secondaryButtonText}>Camera</Text>
+              <Text style={styles.secondaryButtonText}>
+                {hasPhoto ? "Retake" : "Camera"}
+              </Text>
             </Pressable>
 
             <Pressable
               style={styles.secondaryButton}
               onPress={() => pickImage(false)}
-              disabled={analyzing || saving}
+              disabled={busy}
             >
               <ImagePlus size={18} color={C.text} />
-              <Text style={styles.secondaryButtonText}>Gallery</Text>
+              <Text style={styles.secondaryButtonText}>
+                {hasPhoto ? "Change photo" : "Gallery"}
+              </Text>
             </Pressable>
           </View>
         </View>
 
         <Pressable
-          style={[
+          style={({ pressed }) => [
             styles.primaryButton,
-            (!imageBase64 || analyzing || saving) && styles.disabledButton,
+            (!imageBase64 || busy) && styles.disabledButton,
+            pressed && styles.pressed,
           ]}
           onPress={analyzeMeal}
-          disabled={!imageBase64 || analyzing || saving}
+          disabled={!imageBase64 || busy}
         >
-          {analyzing ? (
-            <>
-              <ActivityIndicator color={C.bg} />
-              <Text style={styles.primaryButtonText}>Analyzing meal...</Text>
-            </>
+          {hasPhoto ? (
+            <Check size={19} color={C.bg} strokeWidth={3} />
           ) : (
-            <>
-              <ScanLine size={19} color={C.bg} />
-              <Text style={styles.primaryButtonText}>Analyze with AI</Text>
-            </>
+            <ScanLine size={19} color={C.bg} />
           )}
+          <Text style={styles.primaryButtonText}>
+            {meal
+              ? "Analyze again"
+              : hasPhoto
+                ? "Analyze this photo"
+                : "Analyze with AI"}
+          </Text>
         </Pressable>
 
-        {analyzing && (
-          <View style={styles.statusCard}>
-            <ActivityIndicator color={C.accent} />
-
-            <View style={styles.statusContent}>
-              <Text style={styles.statusTitle}>Looking at your meal</Text>
-              <Text style={styles.hint}>
-                Identifying foods and estimating portions. This may take a few
-                seconds.
-              </Text>
-            </View>
-          </View>
-        )}
-
         {meal && (
-          <View style={styles.results}>
+          <View style={styles.results} onLayout={handleResultsLayout}>
             <View style={styles.stepHeader}>
               <View style={styles.stepBadge}>
                 <Text style={styles.stepNumber}>02</Text>
@@ -652,7 +796,7 @@ export default function ScanMealScreen() {
               <View style={styles.stepText}>
                 <Text style={styles.sectionTitle}>Review your meal</Text>
                 <Text style={styles.hint}>
-                  Edit any estimates that look incorrect
+                  Change a portion and its nutrition updates automatically
                 </Text>
               </View>
             </View>
@@ -679,8 +823,17 @@ export default function ScanMealScreen() {
               </Text>
             </View>
 
+            {meal.items.length === 0 && (
+              <View style={styles.emptyCard}>
+                <Text style={styles.emptyTitle}>All items removed</Text>
+                <Text style={styles.emptyText}>
+                  Choose another photo or analyze this one again.
+                </Text>
+              </View>
+            )}
+
             {meal.items.map((item, index) => (
-              <View style={styles.foodCard} key={`food-${index}`}>
+              <View style={styles.foodCard} key={item.id}>
                 <View style={styles.foodCardHeader}>
                   <View style={styles.itemNumberBadge}>
                     <Text style={styles.foodNumber}>
@@ -690,15 +843,21 @@ export default function ScanMealScreen() {
 
                   <Text style={styles.itemLabel}>FOOD ITEM</Text>
 
+                  <View style={styles.kcalChip}>
+                    <Flame size={12} color={C.accent} />
+                    <Text style={styles.kcalChipText}>
+                      {Math.round(num(item.values.calories))} kcal
+                    </Text>
+                  </View>
+
                   <Pressable
-                    onPress={() => removeItem(index)}
+                    onPress={() => removeItem(item.id)}
                     style={styles.removeButton}
                     hitSlop={8}
                     accessibilityRole="button"
                     accessibilityLabel={`Remove ${item.name}`}
                   >
                     <Trash2 size={16} color={C.danger} />
-                    <Text style={styles.removeText}>Remove</Text>
                   </Pressable>
                 </View>
 
@@ -706,10 +865,10 @@ export default function ScanMealScreen() {
                 <TextInput
                   style={styles.input}
                   value={item.name}
-                  onChangeText={(value) => updateItem(index, "name", value)}
+                  onChangeText={(value) => updateName(item.id, value)}
                   placeholder="Food name"
                   placeholderTextColor={C.muted}
-                  editable={!saving && !analyzing}
+                  editable={!busy}
                 />
 
                 <Text style={styles.inputLabel}>PORTION SIZE</Text>
@@ -717,44 +876,41 @@ export default function ScanMealScreen() {
                 <View style={styles.quantityInputRow}>
                   <TextInput
                     style={styles.quantityInput}
-                    value={String(item.quantity_g)}
+                    value={item.values.quantity_g}
                     onChangeText={(value) =>
-                      updateItem(index, "quantity_g", value)
+                      updateValue(item.id, "quantity_g", value)
                     }
                     keyboardType="decimal-pad"
                     placeholder="Quantity"
                     placeholderTextColor={C.muted}
-                    editable={!saving && !analyzing}
+                    editable={!busy}
                   />
 
                   <Text style={styles.unitBadge}>GRAMS</Text>
                 </View>
 
                 <Text style={styles.inputLabel}>NUTRITION VALUES</Text>
+                <Text style={styles.fieldHint}>
+                  Updates with the portion. Edit a value to correct it.
+                </Text>
 
                 <View style={styles.nutritionGrid}>
-                  {(
-                    [
-                      ["Calories (kcal)", "calories"],
-                      ["Protein (g)", "protein"],
-                      ["Carbs (g)", "carbs"],
-                      ["Fat (g)", "fat"],
-                      ["Fiber (g)", "fiber"],
-                    ] as const
-                  ).map(([label, field]) => (
+                  {NUTRITION_FIELDS.map((field) => (
                     <View style={styles.nutritionInput} key={field}>
-                      <Text style={styles.inputLabel}>{label}</Text>
+                      <Text style={styles.inputLabel}>
+                        {NUTRITION_LABELS[field]}
+                      </Text>
 
                       <TextInput
                         style={styles.input}
-                        value={String(item[field])}
+                        value={item.values[field]}
                         onChangeText={(value) =>
-                          updateItem(index, field, value)
+                          updateValue(item.id, field, value)
                         }
                         keyboardType="decimal-pad"
                         placeholder="0"
                         placeholderTextColor={C.muted}
-                        editable={!saving && !analyzing}
+                        editable={!busy}
                       />
                     </View>
                   ))}
@@ -762,177 +918,115 @@ export default function ScanMealScreen() {
               </View>
             ))}
 
-            <Pressable
-              style={styles.addFoodButton}
-              onPress={() => setShowAddForm((visible) => !visible)}
-              disabled={saving || analyzing}
-            >
-              <View style={styles.addFoodIcon}>
-                {showAddForm ? (
-                  <X size={20} color={C.bg} />
-                ) : (
-                  <Plus size={21} color={C.bg} />
-                )}
-              </View>
+            {meal.items.length > 0 && (
+              <>
+                <View style={styles.stepHeader}>
+                  <View style={styles.stepBadge}>
+                    <Text style={styles.stepNumber}>03</Text>
+                  </View>
 
-              <View style={styles.addFoodTextContainer}>
-                <Text style={styles.addFoodTitle}>
-                  {showAddForm ? "Cancel adding food" : "Missing something?"}
-                </Text>
+                  <View style={styles.stepText}>
+                    <Text style={styles.sectionTitle}>Meal nutrition</Text>
+                    <Text style={styles.hint}>
+                      Combined estimates for all listed foods
+                    </Text>
+                  </View>
+                </View>
 
-                <Text style={styles.addFoodSubtitle}>
-                  Add another food item manually
-                </Text>
-              </View>
+                <View style={styles.totalsCard}>
+                  <View style={styles.caloriePanel}>
+                    <View style={styles.calorieIcon}>
+                      <Flame size={21} color={C.accent} />
+                    </View>
 
-              <ChevronRight
-                size={18}
-                color={C.accent}
-                style={
-                  showAddForm ? { transform: [{ rotate: "90deg" }] } : undefined
-                }
-              />
-            </Pressable>
+                    <Text style={styles.totalLabel}>TOTAL CALORIES</Text>
 
-            {showAddForm && (
-              <View style={styles.addForm}>
-                <Text style={styles.addFormTitle}>Add a food item</Text>
+                    <View style={styles.calorieRow}>
+                      <AnimatedNumber
+                        value={totals.calories}
+                        duration={450}
+                        style={styles.calorieValue}
+                      />
+                      <Text style={styles.calorieUnit}>kcal</Text>
+                    </View>
+                  </View>
 
-                <Text style={styles.formHint}>
-                  Enter nutrition for the full portion you specify.
-                </Text>
+                  <View style={styles.totalMacros}>
+                    <View style={styles.macro}>
+                      <Beef size={17} color={C.accent} />
+                      <Text style={styles.macroValue}>
+                        <AnimatedNumber
+                          value={totals.protein}
+                          decimals={1}
+                          duration={450}
+                        />{" "}
+                        g
+                      </Text>
+                      <Text style={styles.macroLabel}>Protein</Text>
+                    </View>
 
-                <Text style={styles.inputLabel}>FOOD NAME *</Text>
-                <TextInput
-                  style={styles.input}
-                  value={newFood.name}
-                  onChangeText={(value) => updateNewFood("name", value)}
-                  placeholder="e.g. Chapati"
-                  placeholderTextColor={C.muted}
-                  editable={!saving && !analyzing}
-                />
+                    <View style={styles.macro}>
+                      <Wheat size={17} color="#E8C477" />
+                      <Text style={styles.macroValue}>
+                        <AnimatedNumber
+                          value={totals.carbs}
+                          decimals={1}
+                          duration={450}
+                        />{" "}
+                        g
+                      </Text>
+                      <Text style={styles.macroLabel}>Carbs</Text>
+                    </View>
 
-                <Text style={styles.inputLabel}>QUANTITY (G) *</Text>
-                <TextInput
-                  style={styles.input}
-                  value={newFood.quantity_g}
-                  onChangeText={(value) => updateNewFood("quantity_g", value)}
-                  keyboardType="decimal-pad"
-                  placeholder="100"
-                  placeholderTextColor={C.muted}
-                  editable={!saving && !analyzing}
-                />
+                    <View style={styles.macro}>
+                      <Droplets size={17} color="#8BCBFF" />
+                      <Text style={styles.macroValue}>
+                        <AnimatedNumber
+                          value={totals.fat}
+                          decimals={1}
+                          duration={450}
+                        />{" "}
+                        g
+                      </Text>
+                      <Text style={styles.macroLabel}>Fat</Text>
+                    </View>
 
-                <View style={styles.nutritionGrid}>
-                  {renderNutritionInput("Calories (kcal) *", "calories", "0")}
-                  {renderNutritionInput("Protein (g) *", "protein", "0")}
-                  {renderNutritionInput("Carbs (g) *", "carbs", "0")}
-                  {renderNutritionInput("Fat (g) *", "fat", "0")}
-                  {renderNutritionInput("Fiber (g) *", "fiber", "0")}
+                    <View style={styles.macro}>
+                      <Leaf size={17} color="#9EE0B0" />
+                      <Text style={styles.macroValue}>
+                        <AnimatedNumber
+                          value={totals.fiber}
+                          decimals={1}
+                          duration={450}
+                        />{" "}
+                        g
+                      </Text>
+                      <Text style={styles.macroLabel}>Fiber</Text>
+                    </View>
+                  </View>
+
+                  <Text style={styles.disclaimer}>
+                    These values are estimates, not laboratory measurements.
+                    Saving adds them to your daily calories and macros.
+                  </Text>
                 </View>
 
                 <Pressable
-                  style={styles.primaryButton}
-                  onPress={addFoodItem}
-                  disabled={saving || analyzing}
+                  style={({ pressed }) => [
+                    styles.primaryButton,
+                    busy && styles.disabledButton,
+                    pressed && styles.pressed,
+                  ]}
+                  onPress={saveMeal}
+                  disabled={busy}
                 >
-                  <Plus size={18} color={C.bg} />
-                  <Text style={styles.primaryButtonText}>Add to meal</Text>
-                </Pressable>
-              </View>
-            )}
-
-            <View style={styles.stepHeader}>
-              <View style={styles.stepBadge}>
-                <Text style={styles.stepNumber}>03</Text>
-              </View>
-
-              <View style={styles.stepText}>
-                <Text style={styles.sectionTitle}>Meal nutrition</Text>
-                <Text style={styles.hint}>
-                  Combined estimates for all listed foods
-                </Text>
-              </View>
-            </View>
-
-            <View style={styles.totalsCard}>
-              <View style={styles.caloriePanel}>
-                <View style={styles.calorieIcon}>
-                  <Flame size={21} color={C.accent} />
-                </View>
-
-                <Text style={styles.totalLabel}>TOTAL CALORIES</Text>
-
-                <View style={styles.calorieRow}>
-                  <Text style={styles.calorieValue}>
-                    {Math.round(totals.calories)}
-                  </Text>
-                  <Text style={styles.calorieUnit}>kcal</Text>
-                </View>
-              </View>
-
-              <View style={styles.totalMacros}>
-                <View style={styles.macro}>
-                  <Beef size={17} color={C.accent} />
-                  <Text style={styles.macroValue}>
-                    {totals.protein.toFixed(1)} g
-                  </Text>
-                  <Text style={styles.macroLabel}>Protein</Text>
-                </View>
-
-                <View style={styles.macro}>
-                  <Wheat size={17} color="#E8C477" />
-                  <Text style={styles.macroValue}>
-                    {totals.carbs.toFixed(1)} g
-                  </Text>
-                  <Text style={styles.macroLabel}>Carbs</Text>
-                </View>
-
-                <View style={styles.macro}>
-                  <Droplets size={17} color="#8BCBFF" />
-                  <Text style={styles.macroValue}>
-                    {totals.fat.toFixed(1)} g
-                  </Text>
-                  <Text style={styles.macroLabel}>Fat</Text>
-                </View>
-
-                <View style={styles.macro}>
-                  <Leaf size={17} color="#9EE0B0" />
-                  <Text style={styles.macroValue}>
-                    {totals.fiber.toFixed(1)} g
-                  </Text>
-                  <Text style={styles.macroLabel}>Fiber</Text>
-                </View>
-              </View>
-
-              <Text style={styles.disclaimer}>
-                These values are estimates, not laboratory measurements.
-              </Text>
-            </View>
-
-            <Pressable
-              style={[
-                styles.primaryButton,
-                (saving || analyzing || meal.items.length === 0) &&
-                  styles.disabledButton,
-              ]}
-              onPress={saveMeal}
-              disabled={saving || analyzing || meal.items.length === 0}
-            >
-              {saving ? (
-                <>
-                  <ActivityIndicator color={C.bg} />
-                  <Text style={styles.primaryButtonText}>Saving meal...</Text>
-                </>
-              ) : (
-                <>
                   <CheckCircle2 size={19} color={C.bg} />
                   <Text style={styles.primaryButtonText}>
                     Save meal to today
                   </Text>
-                </>
-              )}
-            </Pressable>
+                </Pressable>
+              </>
+            )}
           </View>
         )}
 
@@ -952,10 +1046,15 @@ export default function ScanMealScreen() {
           </Text>
         </View>
       </ScrollView>
+
+      <FoodLoadingOverlay
+        visible={analyzing || saving}
+        title={phaseCopy.title}
+        messages={phaseCopy.messages}
+      />
     </KeyboardAvoidingView>
   );
 }
-
 
 const C = {
   bg: "#101010",
@@ -1069,6 +1168,11 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 18,
   },
+  pressed: {
+    opacity: 0.8,
+  },
+
+  /* Photo */
   photoCard: {
     padding: 12,
     borderRadius: 20,
@@ -1146,6 +1250,31 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
   },
+  confirmWrap: {
+    position: "absolute",
+    right: 10,
+    bottom: 10,
+  },
+  confirmPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
+    paddingLeft: 12,
+    paddingRight: 16,
+    paddingVertical: 11,
+    borderRadius: 999,
+    backgroundColor: C.accent,
+    shadowColor: C.accent,
+    shadowOpacity: 0.45,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 8,
+  },
+  confirmText: {
+    color: C.bg,
+    fontSize: 14,
+    fontWeight: "900",
+  },
   photoActions: {
     flexDirection: "row",
     gap: 10,
@@ -1187,25 +1316,8 @@ const styles = StyleSheet.create({
   disabledButton: {
     opacity: 0.45,
   },
-  statusCard: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 13,
-    backgroundColor: C.card,
-    borderWidth: 1,
-    borderColor: C.border,
-    borderRadius: 15,
-    padding: 16,
-  },
-  statusContent: {
-    flex: 1,
-    gap: 4,
-  },
-  statusTitle: {
-    color: C.text,
-    fontSize: 14,
-    fontWeight: "700",
-  },
+
+  /* Results */
   results: {
     gap: 16,
     marginTop: 8,
@@ -1250,6 +1362,26 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 18,
   },
+  emptyCard: {
+    alignItems: "center",
+    padding: 22,
+    borderRadius: 17,
+    backgroundColor: C.card,
+    borderWidth: 1,
+    borderColor: C.border,
+    gap: 6,
+  },
+  emptyTitle: {
+    color: C.text,
+    fontSize: 16,
+    fontWeight: "700",
+  },
+  emptyText: {
+    color: C.muted,
+    fontSize: 12,
+    lineHeight: 18,
+    textAlign: "center",
+  },
   foodCard: {
     padding: 15,
     borderRadius: 17,
@@ -1284,16 +1416,27 @@ const styles = StyleSheet.create({
     letterSpacing: 1.1,
     flex: 1,
   },
-  removeButton: {
+  kcalChip: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 5,
-    padding: 5,
+    gap: 4,
+    paddingHorizontal: 9,
+    paddingVertical: 6,
+    borderRadius: 9,
+    backgroundColor: "#242D1D",
   },
-  removeText: {
-    color: C.danger,
-    fontSize: 12,
-    fontWeight: "600",
+  kcalChipText: {
+    color: C.accent,
+    fontSize: 11,
+    fontWeight: "800",
+  },
+  removeButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    backgroundColor: "#332222",
+    alignItems: "center",
+    justifyContent: "center",
   },
   inputLabel: {
     color: "#B7B7B7",
@@ -1302,6 +1445,13 @@ const styles = StyleSheet.create({
     letterSpacing: 0.8,
     marginTop: 9,
     marginBottom: 5,
+  },
+  fieldHint: {
+    color: C.muted,
+    fontSize: 11,
+    lineHeight: 16,
+    marginTop: -2,
+    marginBottom: 2,
   },
   input: {
     backgroundColor: "#111111",
@@ -1351,58 +1501,6 @@ const styles = StyleSheet.create({
   nutritionInput: {
     width: "47%",
     flexGrow: 1,
-  },
-  addFoodButton: {
-    minHeight: 70,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
-    padding: 13,
-    borderRadius: 15,
-    borderWidth: 1,
-    borderColor: "#526E38",
-    backgroundColor: "#1A2415",
-  },
-  addFoodIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 13,
-    backgroundColor: C.accent,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  addFoodTextContainer: {
-    flex: 1,
-    gap: 4,
-  },
-  addFoodTitle: {
-    color: C.accent,
-    fontSize: 14,
-    fontWeight: "700",
-  },
-  addFoodSubtitle: {
-    color: C.muted,
-    fontSize: 11,
-  },
-  addForm: {
-    backgroundColor: C.card,
-    borderWidth: 1,
-    borderColor: "#526E38",
-    borderRadius: 17,
-    padding: 15,
-    gap: 5,
-  },
-  addFormTitle: {
-    color: C.text,
-    fontSize: 17,
-    fontWeight: "800",
-  },
-  formHint: {
-    color: C.muted,
-    fontSize: 12,
-    lineHeight: 18,
-    marginTop: 4,
-    marginBottom: 5,
   },
   totalsCard: {
     padding: 14,
@@ -1509,5 +1607,4 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     letterSpacing: 1.2,
   },
-
 });

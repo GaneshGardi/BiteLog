@@ -60,6 +60,8 @@ Deno.serve(async (req) => {
     const body = await req.json();
     const logDate = body?.log_date;
     const items = body?.items;
+    const mealName =
+      typeof body?.meal_name === 'string' ? body.meal_name.trim() : '';
 
     if (
       typeof logDate !== 'string' ||
@@ -88,7 +90,15 @@ Deno.serve(async (req) => {
       'fiber',
     ] as const;
 
-    const rows = [];
+    const totals = {
+      quantity_g: 0,
+      calories: 0,
+      protein: 0,
+      carbs: 0,
+      fat: 0,
+      fiber: 0,
+    };
+    const names: string[] = [];
 
     for (const item of items as MealItem[]) {
       if (
@@ -122,33 +132,42 @@ Deno.serve(async (req) => {
         return respond({ error: 'Nutrition values are outside allowed limits' }, 400);
       }
 
-      rows.push({
-        user_id: user.id,
-        food_id: null,
-        food_name: item.name.trim(),
-        quantity: item.quantity_g,
-        unit: 'g',
-        calories: item.calories,
-        protein: item.protein,
-        carbs: item.carbs,
-        fat: item.fat,
-        fiber: item.fiber,
-        log_date: logDate,
-        source: 'ai',
-      });
+      names.push(item.name.trim());
+      totals.quantity_g += item.quantity_g;
+      totals.calories += item.calories;
+      totals.protein += item.protein;
+      totals.carbs += item.carbs;
+      totals.fat += item.fat;
+      totals.fiber += item.fiber;
     }
+
+    const foodName = (mealName || names.join(', ')).slice(0, 120);
 
     const { data, error } = await supabase
       .from('food_logs')
-      .insert(rows)
-      .select('id, food_name, quantity, calories, protein, carbs, fat, fiber, log_date, source');
+      .insert({
+        user_id: user.id,
+        food_id: null,
+        food_name: foodName,
+        quantity: Math.round(totals.quantity_g * 10) / 10,
+        unit: 'g',
+        calories: Math.round(totals.calories * 10) / 10,
+        protein: Math.round(totals.protein * 10) / 10,
+        carbs: Math.round(totals.carbs * 10) / 10,
+        fat: Math.round(totals.fat * 10) / 10,
+        fiber: Math.round(totals.fiber * 10) / 10,
+        log_date: logDate,
+        source: 'ai',
+      })
+      .select('id, food_name, quantity, calories, protein, carbs, fat, fiber, log_date, source')
+      .single();
 
     if (error) {
       console.error('save-ai-meal database error:', error.message);
-      return respond({ error: 'Could not save meal items' }, 500);
+      return respond({ error: 'Could not save meal' }, 500);
     }
 
-    return respond({ success: true, items: data });
+    return respond({ success: true, items: [data] });
   } catch (error) {
     console.error('save-ai-meal error:', error);
     return respond({ error: 'Unexpected server error' }, 500);

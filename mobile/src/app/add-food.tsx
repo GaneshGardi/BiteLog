@@ -1,8 +1,8 @@
 import { useState, type ReactNode } from "react";
 import {
-  ActivityIndicator,
   Keyboard,
   KeyboardAvoidingView,
+  LayoutAnimation,
   Platform,
   Pressable,
   ScrollView,
@@ -33,6 +33,7 @@ import { calculateFood, logFood, saveFood } from "@/lib/food";
 import { usePostHog } from "posthog-react-native";
 import { Sentry } from "@/lib/sentry";
 import { useAppDialog } from "@/contexts/AppDialogContext";
+import FoodLoadingOverlay from "@/components/FoodLoadingOverlay";
 
 type FoodSearchResult = {
   fdcId: number;
@@ -69,6 +70,38 @@ type CalculationResult = {
   };
 };
 
+type Phase = "search" | "select" | "calculate" | "save";
+
+const PHASE_COPY: Record<Phase, { title: string; messages: string[] }> = {
+  search: {
+    title: "Searching foods",
+    messages: [
+      "Browsing the food database...",
+      "Finding the best matches...",
+      "Almost there...",
+    ],
+  },
+  select: {
+    title: "Getting nutrition",
+    messages: ["Fetching nutrition details...", "Preparing your food..."],
+  },
+  calculate: {
+    title: "Crunching the numbers",
+    messages: [
+      "Calculating your portion...",
+      "Counting calories and macros...",
+    ],
+  },
+  save: {
+    title: "Adding to your log",
+    messages: [
+      "Saving your food...",
+      "Updating today's progress...",
+      "Checking for rewards...",
+    ],
+  },
+};
+
 const C = {
   bg: "#101010",
   card: "#1A1A1A",
@@ -79,6 +112,13 @@ const C = {
   border: "#303030",
   danger: "#FF7777",
 };
+
+/** Smoothly animates the next layout change (results appearing, etc.). */
+function smooth() {
+  LayoutAnimation.configureNext(
+    LayoutAnimation.create(260, "easeInEaseOut", "opacity"),
+  );
+}
 
 export default function AddFoodScreen() {
   const posthog = usePostHog();
@@ -95,6 +135,8 @@ export default function AddFoodScreen() {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
+  // Not reset after loading, so the text doesn't change while the overlay fades out.
+  const [phase, setPhase] = useState<Phase>("search");
 
   async function searchFoods() {
     const query = search.trim();
@@ -112,6 +154,7 @@ export default function AddFoodScreen() {
     if (loading || saving) return;
 
     Keyboard.dismiss();
+    setPhase("search");
     setLoading(true);
     setHasSearched(false);
     setFoods([]);
@@ -128,6 +171,7 @@ export default function AddFoodScreen() {
         throw new Error(error.message);
       }
 
+      smooth();
       setFoods(data?.foods ?? []);
       setHasSearched(true);
     } catch (error) {
@@ -155,12 +199,14 @@ export default function AddFoodScreen() {
     if (loading || saving) return;
 
     Keyboard.dismiss();
+    setPhase("select");
     setLoading(true);
     setCalculation(null);
 
     try {
       const savedFood = await saveFood(food.fdcId);
 
+      smooth();
       setSelectedFood({
         id: savedFood.id,
         name: savedFood.name,
@@ -227,11 +273,14 @@ export default function AddFoodScreen() {
     if (loading || saving) return;
 
     Keyboard.dismiss();
+    setPhase("calculate");
     setLoading(true);
     setCalculation(null);
 
     try {
       const result = await calculateFood(selectedFood.id, quantityG);
+
+      smooth();
       setCalculation(result);
     } catch (error) {
       Sentry.logger.error("Food nutrition calculation failed", {
@@ -260,6 +309,7 @@ export default function AddFoodScreen() {
     }
 
     Keyboard.dismiss();
+    setPhase("save");
     setSaving(true);
 
     try {
@@ -315,10 +365,13 @@ export default function AddFoodScreen() {
   }
 
   function resetSelection() {
+    smooth();
     setSelectedFood(null);
     setCalculation(null);
     setQuantity("");
   }
+
+  const phaseCopy = PHASE_COPY[phase];
 
   return (
     <KeyboardAvoidingView
@@ -398,27 +451,17 @@ export default function AddFoodScreen() {
           </View>
 
           <Pressable
-            style={[styles.primaryButton, loading && styles.disabledButton]}
+            style={({ pressed }) => [
+              styles.primaryButton,
+              pressed && styles.pressed,
+            ]}
             onPress={searchFoods}
             disabled={loading || saving}
           >
-            {loading ? (
-              <ActivityIndicator color={C.bg} />
-            ) : (
-              <>
-                <Search size={18} color={C.bg} />
-                <Text style={styles.primaryButtonText}>Search foods</Text>
-              </>
-            )}
+            <Search size={18} color={C.bg} />
+            <Text style={styles.primaryButtonText}>Search foods</Text>
           </Pressable>
         </View>
-
-        {loading && (
-          <View style={styles.loadingRow}>
-            <ActivityIndicator color={C.accent} size="small" />
-            <Text style={styles.mutedText}>Finding your food...</Text>
-          </View>
-        )}
 
         {foods.length > 0 && (
           <View style={styles.resultsSection}>
@@ -430,7 +473,10 @@ export default function AddFoodScreen() {
             {foods.map((food) => (
               <Pressable
                 key={food.fdcId}
-                style={styles.foodResult}
+                style={({ pressed }) => [
+                  styles.foodResult,
+                  pressed && styles.pressed,
+                ]}
                 onPress={() => selectFood(food)}
                 disabled={loading || saving}
               >
@@ -526,20 +572,17 @@ export default function AddFoodScreen() {
               </View>
 
               <Pressable
-                style={[styles.primaryButton, loading && styles.disabledButton]}
+                style={({ pressed }) => [
+                  styles.primaryButton,
+                  pressed && styles.pressed,
+                ]}
                 onPress={calculateSelectedFood}
                 disabled={loading || saving}
               >
-                {loading ? (
-                  <ActivityIndicator color={C.bg} />
-                ) : (
-                  <>
-                    <Flame size={18} color={C.bg} />
-                    <Text style={styles.primaryButtonText}>
-                      Calculate nutrition
-                    </Text>
-                  </>
-                )}
+                <Flame size={18} color={C.bg} />
+                <Text style={styles.primaryButtonText}>
+                  Calculate nutrition
+                </Text>
               </Pressable>
             </View>
           </>
@@ -613,20 +656,15 @@ export default function AddFoodScreen() {
               </View>
 
               <Pressable
-                style={[styles.primaryButton, saving && styles.disabledButton]}
+                style={({ pressed }) => [
+                  styles.primaryButton,
+                  pressed && styles.pressed,
+                ]}
                 onPress={confirmAndAdd}
                 disabled={saving || loading}
               >
-                {saving ? (
-                  <ActivityIndicator color={C.bg} />
-                ) : (
-                  <>
-                    <Plus size={19} color={C.bg} />
-                    <Text style={styles.primaryButtonText}>
-                      Confirm & add food
-                    </Text>
-                  </>
-                )}
+                <Plus size={19} color={C.bg} />
+                <Text style={styles.primaryButtonText}>Confirm & add food</Text>
               </Pressable>
 
               <Pressable
@@ -656,6 +694,12 @@ export default function AddFoodScreen() {
           <Text style={styles.footerText}>SMALL STEPS. CONSISTENT PROGRESS.</Text>
         </View>
       </ScrollView>
+
+      <FoodLoadingOverlay
+        visible={loading || saving}
+        title={phaseCopy.title}
+        messages={phaseCopy.messages}
+      />
     </KeyboardAvoidingView>
   );
 }
@@ -826,15 +870,8 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: "800",
   },
-  disabledButton: {
-    opacity: 0.55,
-  },
-  loadingRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 10,
-    paddingVertical: 8,
+  pressed: {
+    opacity: 0.8,
   },
   mutedText: {
     color: C.muted,
