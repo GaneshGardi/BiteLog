@@ -48,7 +48,9 @@
         }
       ],
       "expo-localization",
-      "@sentry/react-native"
+      "@sentry/react-native",
+      "expo-status-bar",
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true,
