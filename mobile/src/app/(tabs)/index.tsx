@@ -38,6 +38,8 @@ import {
   type GamificationSummary,
 } from "../../lib/gamification";
 
+import NotificationOptInCard from "../../components/NotificationOptInCard";
+
 const BG = "#101010";
 const CARD = "#1A1A1A";
 const ACCENT = "#B6F36B";
@@ -456,6 +458,7 @@ export default function HomeScreen() {
 
         {/* Week / points strip */}
         {gamification && <HomeProgressCard summary={gamification} />}
+        {foodLogs.length > 0 && <NotificationOptInCard />}
 
         {/* Macros */}
         <View style={styles.sectionHeader}>

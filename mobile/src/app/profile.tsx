@@ -17,6 +17,9 @@ import { Sentry } from "../lib/sentry";
 import { useAppDialog } from "../contexts/AppDialogContext";
 import { getCurrentUser } from "../lib/auth";
 
+import NotificationSettingsCard from "../components/NotificationSettingsCard";
+import { unregisterPushToken } from "../lib/notifications";
+
 type Gender = "male" | "female" | "other" | "prefer_not_to_say";
 type Goal = "lose" | "maintain" | "gain";
 
@@ -459,6 +462,7 @@ export default function ProfileScreen() {
     posthog.capture("logout_started");
 
     try {
+      await unregisterPushToken();
       const { error } = await supabase.auth.signOut();
 
       if (error) throw error;
@@ -817,6 +821,12 @@ export default function ProfileScreen() {
             )}
           </Pressable>
         </View>
+
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Notifications</Text>
+          <Text style={styles.sectionCaption}>STAY IN THE GAME</Text>
+        </View>
+        <NotificationSettingsCard />
 
         {/* Account */}
         <View style={styles.sectionHeader}>

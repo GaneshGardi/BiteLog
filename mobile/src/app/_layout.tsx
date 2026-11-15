@@ -9,6 +9,7 @@ import { supabase } from "../lib/supabase";
 import { AnimatedSplashOverlay } from "../components/animated-icon";
 import { AppDialogProvider } from "../contexts/AppDialogContext";
 import { RewardProvider } from "../components/RewardContext";
+import { useNotificationRouting } from "../hooks/useNotificationRouting";
 
 function RootLayoutContent() {
   const router = useRouter();
@@ -20,6 +21,8 @@ function RootLayoutContent() {
   const [sessionLoading, setSessionLoading] = useState(true);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [animationFinished, setAnimationFinished] = useState(false);
+
+  useNotificationRouting(isAuthenticated && !sessionLoading);
 
   useEffect(() => {
     let mounted = true;
